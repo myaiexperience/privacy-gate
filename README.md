@@ -2,6 +2,10 @@
 
 端云协同里的数据出境门禁：**哪些数据能出内网，由代码决定，不由大模型自觉决定。**
 
+> **在线试玩**（魔搭创空间，纯规则、不联网、零依赖）：
+> <https://www.modelscope.cn/studios/xysrai/privacy-gate>
+> 贴一段文本进去，看到的就是你把它部署到本地时会得到的同一个判定——页面跑的是本仓库未经简化的规则引擎。
+
 > **English TL;DR** — A privacy gate for local AI agents (opencode + Ollama). The core claim: *"which data must never leave your intranet" should not depend on the LLM's self-discipline.* No fine-tuning, no extra compute: a deterministic keyword rule engine classifies every message (`none` / `medium` / `high`), an opencode plugin hard-blocks remote tools for sensitive levels, and a correction loop lets the user teach the engine new keywords with auto-generated regression cases. v5.1 adds hybrid routing: public tasks are delegated to a free cloud model (DeepSeek V4 Flash via opencode), sensitive tasks stay on your local model — **local brain routes, cloud hands do public work.** See [Quick start](#快速开始) and [Known limitations](#已知局限诚实清单) (the honest list — PRs welcome).
 
 ---
@@ -171,6 +175,10 @@ python check.py
 ## 仓库与反馈
 
 - 主仓库（Gitee）：<https://gitee.com/playing-with-ai-x/privacy-gate>
+- 在线演示（魔搭创空间）：<https://www.modelscope.cn/studios/xysrai/privacy-gate>
+  —— 演示源码在魔搭侧单独维护（创空间的「文件」页可看），但其中的分级引擎与词表
+  是按字节从本仓库同步的，`sync_engine.py --check` 做严格哈希校验，
+  所以页面上的判定与本仓库跑出来的判定必然是同一个
 - 早期设计存档在 [`docs/`](docs)，历次迭代的取舍见 [DECISIONS.md](DECISIONS.md)
 - 问题与 PR：欢迎提 Issue。这是单人 homelab 项目，回复可能不快，但每条都会看——
   尤其是"诚实清单"里那几条该怎么补。
