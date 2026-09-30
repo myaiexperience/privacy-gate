@@ -1,0 +1,15 @@
+# 统一行尾：仓库内一律 LF。
+#
+# 本项目有相当多 Windows 专属实测坑（管道编码、CRLF、Store python 占位 stub）。
+# 行尾一旦漂移，diff 就退化成"整个文件重写"，靠 diff 审阅规则库就失去意义，
+# 字节级回归测试也会变成假阳性。
+* text=auto eol=lf
+
+# 二进制：不做行尾转换
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.zip binary
+*.7z binary

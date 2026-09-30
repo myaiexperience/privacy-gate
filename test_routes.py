@@ -1,0 +1,227 @@
+#!/usr/bin/env python3
+"""
+规则路由回归测试 v5
+- 验证 rules_engine.py 对各类输入的判定是否符合预期
+- 内置用例 + 外部用例（keywords/test_cases.json，由 correct.py 纠正回流自动追加）
+- 含多轮隐私继承用例
+- 含决策日志容错用例（日志写不进去时分级必须照常成功）
+- 用法: python test_routes.py
+- 每次修改 rules.json / rules_engine.py / correct.py 后必须跑一遍
+"""
+
+import json
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "tools"))
+import rules_engine  # noqa: E402
+
+ENGINE = rules_engine
+RULES_PATH = os.path.join(os.path.dirname(__file__), "keywords", "rules.json")
+CASES_PATH = os.path.join(os.path.dirname(__file__), "keywords", "test_cases.json")
+
+
+def classify(text: str) -> str:
+    rules = ENGINE.load_rules(RULES_PATH)
+    result = ENGINE.check_privacy(text, rules)
+    return result["level"]
+
+
+def load_external_cases() -> list:
+    """读取 correct.py 纠正回流自动追加的回归用例。"""
+    if not os.path.exists(CASES_PATH):
+        return []
+    with open(CASES_PATH, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    return [
+        (c["input"], c["expected"], c.get("note", "外部用例"))
+        for c in data
+        if isinstance(c, dict)
+    ]
+
+
+CASES = [
+    # (输入, 期望级别, 说明)
+    # ---- high 命中 ----
+    ("帮我写一份保密协议", "high", "保密→high"),
+    ("看看这份股权分配方案", "high", "股权→high"),
+    ("薪酬结构调整", "high", "薪酬→high"),
+    ("评估一下收购XX公司的可行性", "high", "收购→high"),
+    ("内部财务报表分析", "high", "财务报表→high"),
+    ("核对这些API密钥", "high", "API密钥→high"),
+    ("数据库密码忘了怎么办", "high", "数据库密码→high"),
+    ("这份报价单发给谁", "high", "报价单→high"),
+    ("客户问我们的对外报价能不能再降", "high", "对外报价→high"),
+    ("这批货的底价是多少", "high", "底价→high"),
+    ("商业机密的保护措施", "high", "商业秘密→high"),
+    ("NDA的条款有什么要求", "high", "NDA→high"),
+    ("核心算法专利草案", "high", "核心算法+专利草案→high"),
+    ("融资计划书帮我改一下", "high", "融资计划→high"),
+    ("竞业协议条款解释", "high", "竞业协议→high"),
+
+    # ---- medium 命中 ----
+    ("帮我写封邮件给员工", "medium", "员工→medium"),
+    ("明年预算怎么做", "medium", "预算→medium"),
+    ("这个税务问题怎么处理", "medium", "税务→medium"),
+    ("股东会材料整理", "medium", "股东→medium"),
+    ("客户信息录入模板", "medium", "客户→medium"),
+    ("这个月的销售数据统计", "medium", "销售数据→medium"),
+    ("会议纪要帮我整理", "medium", "会议纪要→medium"),
+    ("招标文件注意事项", "medium", "招标→medium"),
+
+    # ---- none: 纯公开 ----
+    ("今天天气怎么样", "none", "天气→none"),
+    ("Python列表怎么用", "none", "公开编程→none"),
+    ("帮我翻译一段英文", "none", "翻译→none"),
+    ("Docker和K8s的区别", "none", "公开技术对比→none"),
+    ("什么是RAG", "none", "公开概念→none"),
+
+    # ---- 边界: 语义涉密但无关键词(默认保守兜底场景) ----
+    ("上次老王那份文件帮我看看", "none", "语义涉密但规则未命中→none(靠默认保守)"),
+    ("帮我改一下咱们这个方案", "none", "含糊引用→none(靠默认保守)"),
+
+    # ---- 英文 ----
+    ("How to write a contract", "high", "contract→high"),
+    ("explain NDA", "high", "NDA 大小写→high"),
+
+    # ---- ASCII 词边界（v4 新增）----
+    ("the word veranda appears here", "none", "词边界: veranda 内的 nda 不得命中 NDA"),
+    ("this brand and agenda are clear", "none", "词边界: agenda/brand 内的 nda 不得命中 NDA"),
+]
+
+# 多轮隐私继承用例（v4 新增）
+# (本轮输入, 上轮级别, 期望生效级别, 说明)
+INHERIT_CASES = [
+    ("那第三条怎么改", "high", "high", "上一轮 high，追问无关键词 → 继承 high"),
+    ("换个话题，聊聊Docker", "high", "none", "话题切换 → 重置继承"),
+    ("预算怎么做", "medium", "medium", "上一轮 medium，本轮命中 medium → medium"),
+    ("预算怎么做", "high", "high", "上一轮 high，本轮命中 medium → 取高"),
+    ("这个月销售数据发我", "none", "medium", "prev none，本轮命中 medium → medium"),
+]
+
+PASS = 0
+FAIL = 0
+
+
+def check_log_failsoft():
+    """决策日志容错回归（v5.1 起）。
+
+    日志是副产物，分级是核心职责。日志写失败（只读目录 / 容器只读挂载 /
+    CI checkout / 受限沙箱）绝不能让引擎以非零退出码结束——否则插件侧
+    fail-closed 兜底成 medium，会把每条消息都当敏感内容、拦掉所有远程工具。
+    与 DECISIONS.md D11 记录的"引擎失败连锁锁死"同族，触发条件不同而已。
+    """
+    global PASS, FAIL
+    print("-" * 60)
+    print("决策日志容错测试")
+    print("-" * 60)
+
+    tmpdir = tempfile.mkdtemp(prefix="privacy-gate-test-")
+    checks = []
+    try:
+        # 1) 可写路径：返回 True，落盘内容为 LF 结尾的 jsonl
+        good = os.path.join(tmpdir, "ok.jsonl")
+        wrote = ENGINE.log_decision({"session_id": "test", "level": "high"}, good)
+        body = ""
+        if os.path.isfile(good):
+            with open(good, "rb") as f:
+                body = f.read().decode("utf-8", "replace")
+        checks.append((
+            "日志可写 → 返回 True，落盘为 LF 结尾的 jsonl",
+            wrote is True and body.endswith("\n") and "\r\n" not in body and "high" in body,
+        ))
+
+        # 2) 不可写路径（父路径是普通文件）→ 返回 False，绝不抛异常
+        blocker = os.path.join(tmpdir, "not-a-dir")
+        with open(blocker, "w", encoding="utf-8") as f:
+            f.write("x")
+        bad_log = os.path.join(blocker, "routing_log.jsonl")
+        raised = False
+        wrote_bad = None
+        try:
+            wrote_bad = ENGINE.log_decision({"level": "high"}, bad_log)
+        except Exception:
+            raised = True
+        checks.append((
+            "日志不可写 → 返回 False 且不抛异常",
+            (not raised) and wrote_bad is False,
+        ))
+
+        # 3) 端到端：日志不可写时，引擎仍给出正确级别且退出码为 0
+        engine = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                              "tools", "rules_engine.py")
+        env = dict(os.environ, PYTHONUTF8="1", PYTHONIOENCODING="utf-8")
+        r = subprocess.run(
+            [sys.executable, engine, "--json", "--log", "--log-path", bad_log, "--stdin"],
+            input="帮我写一份保密协议".encode("utf-8"),
+            capture_output=True, env=env, timeout=60,
+        )
+        level = None
+        try:
+            level = json.loads(r.stdout.decode("utf-8", "replace").strip()).get("effective_level")
+        except Exception:
+            pass
+        checks.append((
+            f"日志不可写 → 引擎仍判 high 且退出码 0（实得 {level}/{r.returncode}）",
+            r.returncode == 0 and level == "high",
+        ))
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+    for note, ok in checks:
+        if ok:
+            PASS += 1
+        else:
+            FAIL += 1
+        print(f"[{'PASS' if ok else 'FAIL'}] {note}")
+
+
+def main():
+    global PASS, FAIL
+    print("=" * 60)
+    print("规则路由回归测试 v5")
+    print("=" * 60)
+
+    cases = CASES + load_external_cases()
+    for text, expected, note in cases:
+        actual = classify(text)
+        ok = actual == expected
+        if ok:
+            PASS += 1
+        else:
+            FAIL += 1
+        mark = "PASS" if ok else "FAIL"
+        print(f"[{mark}] {text!r:40} → {actual:6} (期望 {expected})  {note}")
+
+    print("-" * 60)
+    print("多轮隐私继承测试")
+    print("-" * 60)
+    rules = ENGINE.load_rules(RULES_PATH)
+    for text, prev, expected, note in INHERIT_CASES:
+        level = ENGINE.check_privacy(text, rules)["level"]
+        effective, inherited, shift = ENGINE.apply_inheritance(level, prev, text)
+        ok = effective == expected
+        if ok:
+            PASS += 1
+        else:
+            FAIL += 1
+        mark = "PASS" if ok else "FAIL"
+        print(
+            f"[{mark}] {text!r:40} prev={prev:6} → {effective:6} (期望 {expected}) "
+            f"继承={inherited} 话题切换={shift}  {note}"
+        )
+
+    check_log_failsoft()
+
+    print("=" * 60)
+    print(f"结果: {PASS} 通过 / {FAIL} 失败")
+    if FAIL:
+        print("注意: 语义涉密但无关键词的用例, 由 worker prompt 的'默认保守'策略兜底")
+    return 1 if FAIL else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

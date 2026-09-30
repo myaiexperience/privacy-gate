@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+
+# 运行时数据（路由日志 / 纠正记录含用户输入，勿提交）
+data/*.jsonl
+data/*.log
+
+# 插件会话状态（跨重启恢复多轮继承）
+.opencode/privacy-gate-state.json
+
+# 编辑器 / 系统
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

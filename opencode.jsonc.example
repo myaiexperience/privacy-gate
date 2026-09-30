@@ -1,0 +1,65 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+
+  // ── 使用说明 ─────────────────────────────────────────────
+  // 1. 复制本文件为 opencode.jsonc，把 baseURL 改成你的 Ollama 地址
+  // 2. qwen3.6:35b 换成你本地已有的模型 tag（ollama list 查看）
+  // 3. 桌面版（OpenCode Desktop）用户：建议把 provider 块放进全局配置
+  //    ~/.config/opencode/opencode.jsonc —— 桌面端模型选择器读全局配置；
+  //    若 provider 已收敛到全局，可删掉本文件的 provider 块。
+  //    桌面端看不到本地模型时，直接切换 @worker agent 即可使用本地模型。
+
+  // ── 本地推理服务器（Ollama）──────────────────────────────
+  "provider": {
+    "ollama": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Ollama",
+      "options": {
+        "baseURL": "http://<你的Ollama服务器IP>:11434/v1"
+      },
+      "models": {
+        "qwen3.6:35b": { "name": "qwen3.6:35b" }
+      }
+    }
+  },
+
+  // ── Agent 定义 ──────────────────────────────────────────
+  // worker：本地主力（隐私门禁入口；medium/high 任务只在本地执行）
+  // cloud ：云端执行（opencode 自带 DeepSeek V4 Flash 免费档），只接公开任务
+  "agent": {
+    "worker": {
+      "description": "本地主力 Agent：隐私门禁 + 一站式执行（medium/high 任务必须用我，我绝不把敏感内容委派云端）",
+      "mode": "primary",
+      "model": "ollama/qwen3.6:35b",
+      "prompt": "{file:./prompts/worker.md}",
+      "temperature": 0.3,
+      "permission": {
+        "read": "allow",
+        "glob": "allow",
+        "grep": "allow",
+        "webfetch": "ask",    // 远程抓取：ask + privacy-gate 插件按级别裁决（none 自动放行）
+        "websearch": "ask",   // 远程搜索：ask + privacy-gate 插件按级别裁决（medium 交用户看搜索词）
+        "write": "allow",
+        "edit": "allow",
+        "bash": "allow"
+      }
+    },
+    "cloud": {
+      "description": "云端执行 Agent（opencode 自带 DeepSeek V4 Flash 免费档）：只处理隐私级别 none 的公开任务",
+      "mode": "subagent",
+      "model": "opencode/deepseek-v4-flash-free",
+      "prompt": "{file:./prompts/cloud.md}",
+      "temperature": 0.3,
+      "permission": {
+        "read": "allow",
+        "glob": "allow",
+        "grep": "allow",
+        "webfetch": "ask",    // 插件在非 none 级别会拒绝；none 级别自动放行
+        "websearch": "ask",
+        "write": "allow",
+        "edit": "allow",
+        "bash": "allow"
+      }
+    }
+  }
+}
