@@ -280,7 +280,8 @@ privacy-gate gateway --local-upstream http://127.0.0.1:11434/v1 --local-model "q
 ├── .github/workflows/ci.yml           # CI：2 个 OS × 3 个 Python 版本
 ├── data/                              # routing_log.jsonl / corrections.jsonl（运行时生成）
 ├── opencode.jsonc.example             # 配置模板（worker + cloud + provider 示例）
-├── docs/                              # 设计文档（v1 方案 / v3 执行计划存档；v6 网关提案；v5→v6 迁移说明；[客户端接入](docs/clients.md)）
+├── docs/                              # 设计文档与复盘长文（v1 方案 / v3 计划 / v6 网关提案 /
+│                                      #   v5→v6 迁移说明 / [客户端接入](docs/clients.md) / [复盘长文](docs/writeup.md)）
 └── DECISIONS.md                       # 历次迭代决策日志（为什么砍、为什么留）
 ```
 
@@ -332,6 +333,9 @@ privacy-gate gateway --local-upstream http://127.0.0.1:11434/v1 --local-model "q
   是按字节从本仓库同步的，`sync_engine.py --check` 做严格哈希校验，
   所以页面上的判定与本仓库跑出来的判定必然是同一个
 - 早期设计存档在 [`docs/`](docs)，历次迭代的取舍见 [DECISIONS.md](DECISIONS.md)
+- **项目复盘长文**：[docs/writeup.md](docs/writeup.md) —— 六次迭代的完整记录，
+  包括我自己设计里的五个漏洞。**这份是单一来源**，发到各平台的内容从它复制
+  （平台上那份不会被任何检查发现，已经因此过期过一次）
 - 问题与 PR：欢迎提 Issue。这是单人 homelab 项目，回复可能不快，但每条都会看——
   尤其是"诚实清单"里那几条该怎么补。
 

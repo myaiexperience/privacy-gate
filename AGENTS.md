@@ -148,7 +148,8 @@ pip 安装）各不一样，散在五个文件里必然会漏改一个。
 ├── check_docs.py                      # 文档命令核对（脚本 / 子命令 / 仓库路径 / 链接）
 ├── test_routes.py / test_gateway.py / test_adapters.py
 ├── .github/workflows/ci.yml           # 2 OS × 3 Python
-├── docs/                              # 设计文档（v1 方案 / v3 计划存档 / v6 网关提案）
+├── docs/                              # 设计文档（v1 方案 / v3 计划 / v6 网关提案 / 迁移说明 / 客户端接入）
+│                                      #   以及 writeup.md —— 复盘长文，**它是各平台发布稿的单一来源**
 ├── data/                              # 运行时日志（勿提交）
 └── DECISIONS.md                       # 决策日志：为什么砍、为什么留
 ```
