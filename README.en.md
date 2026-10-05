@@ -164,16 +164,24 @@ appears in the report.
 ## What is verified, and how
 
 ```
-python check.py           # 11 checks
+python check.py           # 14 checks
 python test_routes.py     # 60 assertions — classification, inheritance, exemptions
-python test_gateway.py    # 25 assertions — re-route, tool stripping, fail-closed, SSE
+python test_gateway.py    # 26 assertions — re-route, tool stripping, fail-closed, SSE
 python test_adapters.py   # 29 assertions — MCP protocol, hook decisions, CLI
+python check_zero_deps.py # every import is stdlib — keeps the "zero deps" claim honest
+python check_no_leaks.py  # no private IPs, user paths, token shapes, or local deny words
 ```
 
 The gateway tests run two fake upstreams (cloud and local) around the gateway, so
 "the cloud never received this request" is an assertion, not a claim. The fail-closed
 direction test points the local upstream at a dead port and asserts the cloud upstream
 received **zero** requests.
+
+Two claims are machine-guarded rather than promised: *zero third-party dependencies*
+(`check_zero_deps.py` resolves each import and fails if it lives in `site-packages`), and
+*no internal information in the repo* (`check_no_leaks.py` — which contains no
+project-specific secret words itself, because an auditor that embeds the secrets is just
+another copy of them).
 
 ## Honest limitations
 
@@ -196,8 +204,26 @@ before trusting it with anything:
 - **Sessions are keyed by request metadata.** OpenAI's API has no session concept. If a
   client sends no `x-session-id` / `user`, everything falls back to one shared session —
   correct (over-inherit) but coarse. `/healthz` reports the fallback ratio.
-- **Python 3.9+ is the stated floor and this machine only has 3.12.** The CI matrix tests
-  3.9 / 3.12 / 3.13; treat the lower bound as asserted, not verified here.
+- **Python 3.9+ is the stated floor and the machine this was written on only has 3.12.**
+  The CI matrix covers 3.9 / 3.12 / 3.13; treat the lower bound as *asserted by CI*, not
+  verified by hand here.
+- **The gateway is verified against fake upstreams, never against a real Ollama.** The 26
+  assertions in `test_gateway.py` wrap the gateway with a fake cloud and a fake local
+  upstream, which proves the *mechanism* — re-route, tool stripping, inheritance,
+  fail-closed direction. It does not prove it *works*: a real Ollama may 400 on an
+  unknown model name, reject a field, or refuse on context length. The author's inference
+  box was offline while this was written, so that step **was not done here**. One command
+  closes the gap:
+
+  ```bash
+  python tools/gateway_smoke.py --local-upstream http://<your-ollama>:11434/v1 \
+      --local-model <model>
+  ```
+
+  It sends real requests and asserts only the **routing decision**, never answer quality.
+  The script has a `--self-test` that needs no upstream and runs in CI — so it cannot rot
+  before you use it.
+- **Single-person homelab.** Not production-grade, not load-tested. Issues and PRs welcome.
 
 ## Why this repo might still be worth your time
 

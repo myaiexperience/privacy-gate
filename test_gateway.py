@@ -19,6 +19,7 @@ import json
 import os
 import shutil
 import socket
+import subprocess
 import sys
 import tempfile
 import threading
@@ -337,6 +338,20 @@ def main():
               repr(streamed[:80]))
         check("流式：路由头仍然带上", "route=local" in r.headers.get("x-privacy-gate", ""),
               r.headers.get("x-privacy-gate", ""))
+
+        # ── 11. 冒烟脚本自检 ──
+        # gateway_smoke.py 是给使用者拿去连**真实 Ollama** 的。它自己必须先被跑过——
+        # 一个从没执行过的脚本，等你真接上模型时大概率是坏的，而那正是最不该出岔子的时刻。
+        smoke = os.path.join(_HERE, "tools", "gateway_smoke.py")
+        try:
+            rs = subprocess.run([sys.executable, smoke, "--self-test"],
+                                capture_output=True, timeout=180)
+            sout = rs.stdout.decode("utf-8", "replace")
+            ok = rs.returncode == 0 and "通过" in sout
+            check("网关冒烟脚本自检通过（它要被拿去连真模型）", ok,
+                  (sout.strip().splitlines() or [""])[-1][:80])
+        except Exception as e:
+            check("网关冒烟脚本自检通过（它要被拿去连真模型）", False, str(e))
 
         # ── 收尾：关服务器 ──
         for s in (srv1, srv2, srv3, srv4, srv5, cloud_srv, local_srv, sse_srv):

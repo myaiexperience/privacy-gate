@@ -230,6 +230,7 @@ x-privacy-gate: level=high policy=reroute inherited=true tools-stripped=web_sear
 ├── tools/rules_engine.py              # 分级编排 + 多轮继承 + 决策日志
 ├── tools/session.py                   # 会话状态（网关与适配器共用的会话键推导 + 继承）
 ├── tools/gateway.py                   # ★ 传输层门禁：重路由 / 工具剥夺 / fail-closed（v6 核心）
+├── tools/gateway_smoke.py             # 拿**真实上游**验一次端到端（自带 --self-test）
 ├── tools/correct.py                   # 纠正回流（扩充 / 收窄 / 降级 / 豁免 + 回归用例）
 ├── tools/explain.py                   # 解释"这段话为什么被判成这个级别"
 ├── tools/stats.py                     # 决策日志统计（最吵的规则与关键词）
@@ -263,6 +264,19 @@ x-privacy-gate: level=high policy=reroute inherited=true tools-stripped=web_sear
 - **permission.ask 不可靠**：opencode 该 hook 有历史 bug 和回归记录，强制拦截只信 `tool.execute.before`
 - **云端护栏是 best-effort**：消息层抛错拦截受 opencode 版本行为影响；真正保险的是"敏感任务只用 @worker"
 - **插件字段名随版本漂移**：`chat.message` 的消息结构在不同 SDK 版本有差异；注入标注只改已有 part 的 text 字段、绝不新增 part（新增 part 缺 id/sessionID/messageID 会让桌面端消息保存失败）
+- **网关的机制验证用的是假上游，没在真实 Ollama 上跑过。** `test_gateway.py` 用一对假上游
+  （云 / 本地）夹住网关，验证了重路由、工具剥夺、会话继承和 fail-closed 的方向性——
+  那是**机制**验证。但机制对了不等于能用：真实 Ollama 可能因为模型名不对而 400、
+  可能不支持某个字段、可能因上下文长度而拒绝。写这套东西时作者的推理服务器不在线，
+  所以那一步**没在作者机器上做过**。补上它只要一条命令：
+
+  ```bash
+  python tools/gateway_smoke.py --local-upstream http://<你的Ollama>:11434/v1 \
+      --local-model <模型名>
+  ```
+
+  它会打真请求，并只断言**路由决策**（不断言回答质量）。脚本自带 `--self-test`
+  （不需要任何真实上游，CI 里每次都会跑——免得它自己烂掉）。
 - **单人 homelab 验证**：非生产级、非大规模测试，欢迎反馈和 PR
 
 以上每一条，都是一块等人来补的"玉"。
