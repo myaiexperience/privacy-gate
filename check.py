@@ -25,6 +25,8 @@ opencode 隐私门禁一键体检（check.py）
   7. 回归测试         test_routes.py 全绿
   7.5 网关回归        test_gateway.py 全绿：重路由 / 工具剥夺 / 会话继承 /
                      fail-closed 方向性（本地上游挂了必须 502，绝不改走云端）
+  7.6 适配器回归      test_adapters.py 全绿：MCP 协议 / Claude Code hook 决策 /
+                     裸 CLI 分发；含"规则不可用时 fail-closed"这条安全回归
 
 用法:
   python 01-OpenCode配置/check.py      # 活体项目布局
@@ -906,6 +908,33 @@ def check_gateway():
         record("网关回归", "FAIL", f"退出码 {r.returncode}，末尾输出: {last}")
 
 
+# ── 7.6 适配器回归 ─────────────────────────────────────────
+
+def check_adapters():
+    """适配器回归：MCP 协议 / Claude Code hook 决策 / 裸 CLI 分发。
+
+    能测的是**协议逻辑**；与真实客户端的接线测不了（这台机器上没有 Claude Code
+    也没有 MCP 客户端）——适配器 README 里如实标了这一点。
+    fail-closed 是重点：规则文件缺失或损坏时，hook 必须拒绝远程工具。
+    """
+    path = _first_existing(os.path.join(CANON_DIR, "test_adapters.py"),
+                           os.path.join(PROJECT_ROOT, "test_adapters.py"))
+    if not os.path.isfile(path):
+        record("适配器回归", "FAIL", f"test_adapters.py 不存在: {path}")
+        return
+    try:
+        r = run_py([path], CANON_DIR, timeout=300)
+    except Exception as e:
+        record("适配器回归", "FAIL", f"调用异常: {e}")
+        return
+    lines = r.stdout.decode("utf-8", "replace").strip().splitlines()
+    last = lines[-1] if lines else ""
+    if r.returncode == 0:
+        record("适配器回归", "PASS", last)
+    else:
+        record("适配器回归", "FAIL", f"退出码 {r.returncode}，末尾输出: {last}")
+
+
 # ── 主流程 ─────────────────────────────────────────────────
 
 def main():
@@ -935,6 +964,7 @@ def main():
         check_ollama(cfg, gcfg)
     check_tests()
     check_gateway()
+    check_adapters()
 
     print("=" * 60)
     fails = [r for r in results if r[1] == "FAIL"]

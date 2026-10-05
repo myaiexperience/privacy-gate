@@ -232,9 +232,14 @@ x-privacy-gate: level=high policy=reroute inherited=true tools-stripped=web_sear
 ├── keywords/test_cases.json           # 纠正回流生成的回归用例
 ├── prompts/worker.md                  # 本地执行 agent 的系统提示（含兜底路径 + 委派规则）
 ├── prompts/cloud.md                   # 云端 agent 的系统提示（非 none 即拒绝）
+├── privacy_gate.py                    # 裸 CLI 入口：classify/explain/stats/correct/lint/gateway/doctor
+├── adapters/                          # 适配器矩阵（网关之外的接法，含各自强度与验证状态）
+│   ├── claude-code/                   #   PreToolUse / UserPromptSubmit hook
+│   └── mcp/                           #   MCP stdio server（弱层，刻意只读）
 ├── check.py                           # 一键体检（活体项目/发布包双布局自适应）
 ├── test_routes.py                     # 分级回归测试
 ├── test_gateway.py                    # 网关回归测试（含"绝不回落云端"）
+├── test_adapters.py                   # 适配器回归测试（MCP 协议 / hook 决策 / CLI 分发）
 ├── data/                              # routing_log.jsonl / corrections.jsonl（运行时生成）
 ├── opencode.jsonc.example             # 配置模板（worker + cloud + provider 示例）
 ├── docs/                              # 设计文档（v1 方案 / v3 执行计划存档；v6 网关提案）

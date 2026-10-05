@@ -1,0 +1,34 @@
+{
+  "_说明": [
+    "把 hooks 段合并进你的 .claude/settings.json（项目级）或 ~/.claude/settings.json（用户级）。",
+    "把 command 里的路径换成 privacy_gate_hook.py 的绝对路径；Windows 用正斜杠或双反斜杠。",
+    "matcher 是正则，匹配工具名。这里覆盖网络工具与所有 mcp__ 工具，",
+    "但脚本内部还会按 remote_tool_patterns 再判一次，非远程工具直接放行。",
+    "本文件是示例，未在本机实测（这台机器上没有 Claude Code）——见同目录 README 的说明。"
+  ],
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"D:/path/to/privacy-gate/adapters/claude-code/privacy_gate_hook.py\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "WebFetch|WebSearch|mcp__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"D:/path/to/privacy-gate/adapters/claude-code/privacy_gate_hook.py\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}
