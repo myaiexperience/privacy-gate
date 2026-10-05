@@ -78,6 +78,7 @@ def make_upstream(label, records, sse=False):
             self.wfile.write(payload)
 
         def do_GET(self):
+            records.append({"label": label, "path": self.path, "method": "GET"})
             if self.path.split("?", 1)[0] != self.OK_GET:
                 return self._not_found()
             payload = json.dumps({"object": "list", "data": [],
@@ -98,6 +99,7 @@ def make_upstream(label, records, sse=False):
             records.append({
                 "label": label,
                 "path": self.path,
+                "method": "POST",
                 "body": body,
                 "auth": self.headers.get("Authorization"),
             })
@@ -167,6 +169,18 @@ def post(url, body, headers=None, timeout=30):
         req.add_header(k, v)
     try:
         r = urllib.request.urlopen(req, timeout=timeout)
+        return r.status, json.loads(r.read().decode("utf-8")), dict(r.headers)
+    except urllib.error.HTTPError as e:
+        raw = e.read().decode("utf-8", "replace")
+        try:
+            return e.code, json.loads(raw), dict(e.headers)
+        except Exception:
+            return e.code, {"raw": raw}, dict(e.headers)
+
+
+def get(url, timeout=30):
+    try:
+        r = urllib.request.urlopen(urllib.request.Request(url, method="GET"), timeout=timeout)
         return r.status, json.loads(r.read().decode("utf-8")), dict(r.headers)
     except urllib.error.HTTPError as e:
         raw = e.read().decode("utf-8", "replace")
@@ -315,6 +329,15 @@ def main():
         check("healthz 报告重路由上游", str(local_port) in hz.get("upstreams", {}).get("local", ""),
               str(hz.get("upstreams")))
 
+        # ── 6.5 GET /v1/models 透传 ──
+        # 客户端（Cline / Continue / Cursor 之类）启动时先调这个列模型，所以这条路径
+        # 不通的话是"接上就报错"，而不是某个功能失灵。它与 POST 共用同一个 upstream_url()，
+        # 但走单测之外再端到端验一遍，成本只有一次请求。
+        st_m, body_m, _ = get("http://127.0.0.1:%d/v1/models" % port1)
+        check("GET /v1/models 透传成功（客户端列模型走这条）",
+              st_m == 200 and body_m.get("served_by") == "local",
+              "status=%s served_by=%s" % (st_m, body_m.get("served_by")))
+
         # ── 7. ★ fail-closed 方向性：本地上游不可达 → 502，且不回落云端 ──
         dead = gateway.Gateway(gateway.Config(gateway.build_parser().parse_args([
             "--rules", rules_path,
@@ -400,10 +423,20 @@ def main():
 
         # ── 上游实际收到的路径（端到端验一遍那个拼接）──
         # 单测过了还不够：这里看的是**真实请求打过去之后，上游看到的是什么路径**。
-        _paths = sorted({r["path"].split("?")[0] for r in cloud_records + local_records})
-        check("上游收到的路径就是 /v1/chat/completions（没被拼成 /v1/v1/...）",
-              _paths == ["/v1/chat/completions"],
-              "实际上游收到：%s" % _paths)
+        # 按 method 分开断言，因为 GET 与 POST 是两条不同的转发分支
+        # （_proxy_get 与 _handle），任何一条拼错都该被抓到。
+        _post_paths = sorted({r["path"].split("?")[0]
+                              for r in cloud_records + local_records
+                              if r.get("method") == "POST"})
+        _get_paths = sorted({r["path"].split("?")[0]
+                             for r in cloud_records + local_records
+                             if r.get("method") == "GET"})
+        check("POST 转发到上游的路径就是 /v1/chat/completions（没被拼成 /v1/v1/...）",
+              _post_paths == ["/v1/chat/completions"],
+              "实际上游收到：%s" % _post_paths)
+        check("GET 转发到上游的路径就是 /v1/models（没被拼成 /v1/v1/...）",
+              _get_paths == ["/v1/models"],
+              "实际上游收到：%s" % _get_paths)
 
         # ── 12. 启动横幅在重定向下必须实时可见 ──
         # 服务类程序的输出要能被重定向后实时看到。Python 的 stdout 在管道/文件下是

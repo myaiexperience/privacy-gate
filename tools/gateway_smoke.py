@@ -84,9 +84,27 @@ def free_port():
 def make_fake_upstream(records, label):
     class Upstream(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
+        OK_POST = "/v1/chat/completions"
 
         def log_message(self, *a):
             pass
+
+        def _not_found(self):
+            """真上游只认自己的路径——所以这里也必须认。
+
+            ⚠️ 这个替身一开始**接收任何路径**，于是网关把上游 base 的 `/v1` 又拼了一遍
+            （`.../v1/v1/...`）这个真 bug，连 `--self-test` 都放过了；直到接上真的
+            llama.cpp 才以 404 暴露（见 DECISIONS D23）。
+            **一个过于宽容的替身，会让自己的检查看起来是绿的。**
+            """
+            payload = json.dumps({"error": {"message": "File Not Found",
+                                            "type": "not_found_error",
+                                            "code": 404}}).encode("utf-8")
+            self.send_response(404)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
 
         def do_POST(self):
             n = int(self.headers.get("Content-Length") or 0)
@@ -99,7 +117,10 @@ def make_fake_upstream(records, label):
             for t in body.get("tools") or []:
                 fn = t.get("function") if isinstance(t, dict) else None
                 names.append((fn or {}).get("name") or t.get("name"))
-            records.append({"label": label, "model": body.get("model"), "tools": names})
+            records.append({"label": label, "path": self.path,
+                            "model": body.get("model"), "tools": names})
+            if self.path.split("?", 1)[0] != self.OK_POST:
+                return self._not_found()
             payload = json.dumps({"object": "chat.completion", "served_by": label,
                                   "model": body.get("model")}).encode("utf-8")
             self.send_response(200)
@@ -283,6 +304,12 @@ def self_test(args):
     try:
         fails = run_suite("http://127.0.0.1:%d/v1/chat/completions" % port,
                           sensitive, True, args.timeout, args.verbose)
+        # 替身自己也要验收到的路径：一个接受任何路径的替身，会把网关的拼接错
+        # 掩盖成"通过"——这正是它一开始干的事（见 make_fake_upstream 的说明）。
+        bad = sorted({r["path"].split("?")[0] for r in records
+                      if r["path"].split("?")[0] != "/v1/chat/completions"})
+        fails += check("假上游收到的路径都是 /v1/chat/completions（替身没在骗自己）",
+                       not bad, ("异常路径：%s" % bad) if bad else "")
     finally:
         for s in (srv, cloud_srv, local_srv):
             try:
