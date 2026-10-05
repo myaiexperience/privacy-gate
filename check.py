@@ -188,6 +188,54 @@ def run_py(args, cwd, stdin_bytes=None, timeout=180, extra_env=None):
     )
 
 
+def _problem_lines(text, limit=3):
+    """从子进程输出里挑出**真正说明问题**的那几行。
+
+    别只报末行。末行常常是一句安慰话（"而不是让这句话在别人 clone 下来时变成
+    谎话"）或一个汇总数字（"结果: 29 通过 / 2 失败"）——读的人还是不知道哪儿错了，
+    还得自己去翻。带方括号的行才是线索：`[FAIL] 断言名`（测试）、
+    `[依赖] / [第三方] / [找不到]`（零依赖检查）。
+
+    （这条是"体检自己会不会骗自己"那轮普查发现的：六处破坏全都被正确报成 FAIL，
+    但其中两处的 FAIL **没说出原因**。）
+    """
+    out = []
+    for line in (text or "").splitlines():
+        s = line.strip()
+        if s.startswith("[") and "]" in s:
+            out.append(s)
+            if len(out) >= limit:
+                break
+    return out
+
+
+def run_suite(label, path, timeout=300):
+    """跑一个测试套件并记录结果。
+
+    失败时必须报出**是哪几条断言挂了**。以前这里写的是"退出码 1，末尾输出:
+    结果: 29 通过 / 2 失败"——FAIL 是报对了，但读的人拿不到任何线索。
+    报错的价值在于**指出位置**，不在于宣布失败。
+    """
+    if not os.path.isfile(path):
+        record(label, "FAIL", f"文件不存在: {path}")
+        return
+    try:
+        r = run_py([path], CANON_DIR, timeout=timeout)
+    except Exception as e:
+        record(label, "FAIL", f"调用异常: {e}")
+        return
+    text = r.stdout.decode("utf-8", "replace")
+    lines = text.strip().splitlines()
+    last = lines[-1] if lines else ""
+    if r.returncode == 0:
+        record(label, "PASS", last)
+        return
+    fails = _problem_lines(text)
+    record(label, "FAIL",
+           "退出码 %s；%s" % (r.returncode,
+                             " ｜ ".join(fails) if fails else ("末尾输出: " + last)))
+
+
 # ── 1. 配置解析（项目 + 全局合并视图）──────────────────────
 
 GLOBAL_CONFIG_PATH = os.path.join(
@@ -881,20 +929,7 @@ def check_ollama(cfg, gcfg):
 # ── 7. 回归测试 ────────────────────────────────────────────
 
 def check_tests():
-    if not os.path.isfile(TEST_ROUTES):
-        record("回归测试", "FAIL", f"test_routes.py 不存在: {TEST_ROUTES}")
-        return
-    try:
-        r = run_py([TEST_ROUTES], CANON_DIR, timeout=180)
-    except Exception as e:
-        record("回归测试", "FAIL", f"调用异常: {e}")
-        return
-    lines = r.stdout.decode("utf-8", "replace").strip().splitlines()
-    last = lines[-1] if lines else ""
-    if r.returncode == 0:
-        record("回归测试", "PASS", last)
-    else:
-        record("回归测试", "FAIL", f"退出码 {r.returncode}，末尾输出: {last}")
+    run_suite("回归测试", TEST_ROUTES, timeout=180)
 
 
 # ── 7.5 网关回归（传输层门禁）──────────────────────────────
@@ -908,20 +943,7 @@ def check_gateway():
     """
     path = _first_existing(os.path.join(CANON_DIR, "test_gateway.py"),
                            os.path.join(PROJECT_ROOT, "test_gateway.py"))
-    if not os.path.isfile(path):
-        record("网关回归", "FAIL", f"test_gateway.py 不存在: {path}")
-        return
-    try:
-        r = run_py([path], CANON_DIR, timeout=300)
-    except Exception as e:
-        record("网关回归", "FAIL", f"调用异常: {e}")
-        return
-    lines = r.stdout.decode("utf-8", "replace").strip().splitlines()
-    last = lines[-1] if lines else ""
-    if r.returncode == 0:
-        record("网关回归", "PASS", last)
-    else:
-        record("网关回归", "FAIL", f"退出码 {r.returncode}，末尾输出: {last}")
+    run_suite("网关回归", path, timeout=300)
 
 
 # ── 7.6 适配器回归 ─────────────────────────────────────────
@@ -935,20 +957,7 @@ def check_adapters():
     """
     path = _first_existing(os.path.join(CANON_DIR, "test_adapters.py"),
                            os.path.join(PROJECT_ROOT, "test_adapters.py"))
-    if not os.path.isfile(path):
-        record("适配器回归", "FAIL", f"test_adapters.py 不存在: {path}")
-        return
-    try:
-        r = run_py([path], CANON_DIR, timeout=300)
-    except Exception as e:
-        record("适配器回归", "FAIL", f"调用异常: {e}")
-        return
-    lines = r.stdout.decode("utf-8", "replace").strip().splitlines()
-    last = lines[-1] if lines else ""
-    if r.returncode == 0:
-        record("适配器回归", "PASS", last)
-    else:
-        record("适配器回归", "FAIL", f"退出码 {r.returncode}，末尾输出: {last}")
+    run_suite("适配器回归", path, timeout=300)
 
 
 # ── 8. 零第三方依赖 ────────────────────────────────────────
@@ -970,14 +979,18 @@ def check_zero_deps():
     except Exception as e:
         record("零第三方依赖", "FAIL", f"调用异常: {e}")
         return
-    lines = r.stdout.decode("utf-8", "replace").strip().splitlines()
+    text = r.stdout.decode("utf-8", "replace")
+    lines = text.strip().splitlines()
     last = lines[-1] if lines else ""
     scanned = next((l for l in lines if l.startswith("扫描文件")), "")
     if r.returncode == 0:
         record("零第三方依赖", "PASS", "；".join(x for x in (scanned, last) if x))
     else:
+        # 别报末行——那是"而不是让这句话在别人 clone 下来时变成谎话"这种收尾话。
+        # 真正的线索是 [依赖] / [第三方] / [找不到] 那几行。
+        found = _problem_lines(text)
         record("零第三方依赖", "FAIL",
-               last or ("退出码 %s" % r.returncode))
+               " ｜ ".join(found) if found else ("退出码 %s；末尾输出: %s" % (r.returncode, last)))
 
 
 # ── 9. 泄露面审计 ──────────────────────────────────────────
