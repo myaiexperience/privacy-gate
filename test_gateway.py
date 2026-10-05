@@ -23,6 +23,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -352,6 +353,42 @@ def main():
                   (sout.strip().splitlines() or [""])[-1][:80])
         except Exception as e:
             check("网关冒烟脚本自检通过（它要被拿去连真模型）", False, str(e))
+
+        # ── 12. 启动横幅在重定向下必须实时可见 ──
+        # 服务类程序的输出要能被重定向后实时看到。Python 的 stdout 在管道/文件下是
+        # **块缓冲**的：不修的话 `gateway.py > gateway.log` 会长时间一片空白，
+        # 被强杀时连启动横幅一起丢——而横幅是用户判断"服务到底起没起"的唯一线索。
+        #
+        # 这里用 PIPE 复现重定向，然后**硬杀**（TerminateProcess，不触发 flush）：
+        # 横幅还在，说明它当时真的已经写出去了，而不是躺在缓冲区里。
+        gport = unused_port()
+        proc = subprocess.Popen(
+            [sys.executable, os.path.join(_HERE, "tools", "gateway.py"),
+             "--port", str(gport),
+             "--local-upstream", "http://127.0.0.1:%d/v1" % unused_port()],
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        banner = ""
+        try:
+            deadline = time.time() + 25
+            while time.time() < deadline:
+                try:
+                    urllib.request.urlopen(
+                        "http://127.0.0.1:%d/healthz" % gport, timeout=2).read()
+                    break
+                except Exception:
+                    time.sleep(0.3)
+            time.sleep(0.6)      # 给横幅写出的时间
+            proc.terminate()     # 硬杀，不触发 flush
+            try:
+                banner = proc.stdout.read().decode("utf-8", "replace")
+            except Exception:
+                banner = ""
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+        check("启动横幅在重定向下也能实时看到（不是块缓冲）",
+              "网关已启动" in banner,
+              ("拿到 %d 字节" % len(banner)) if banner else "重定向后一个字都没有")
 
         # ── 收尾：关服务器 ──
         for s in (srv1, srv2, srv3, srv4, srv5, cloud_srv, local_srv, sse_srv):

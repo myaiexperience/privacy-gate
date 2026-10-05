@@ -492,6 +492,21 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def serve(cfg):
+    # 起服务前把 stdout 切成行缓冲。
+    #
+    # 为什么必须做：Python 的 stdout 在**重定向到文件或管道**时是块缓冲的
+    # （不是 TTY 就攒够几 KB 才写）。于是
+    #     python tools/gateway.py ... > gateway.log
+    # 会长时间看起来一片空白，被 kill 时连启动横幅一起丢——用户根本不知道
+    # 服务到底起没起。这是发布级验证里真撞到的：用 Start-Process 重定向日志，
+    # 横幅一个字都没有，而进程其实活得好好的。
+    #
+    # 服务类程序的输出必须能被重定向后实时看到，这是它和一次性脚本的区别。
+    try:
+        sys.stdout.reconfigure(line_buffering=True)
+    except Exception:
+        pass
+
     gw = Gateway(cfg)
     Handler.gateway = gw
     httpd = ThreadingHTTPServer((cfg.host, cfg.port), Handler)
