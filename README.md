@@ -169,12 +169,62 @@ python check.py
 插件语法与导出契约、状态文件（假 medium 残留）、Ollama 连通性、回归测试。
 全绿再启动 opencode。
 
+## v6：把门禁下沉到传输层（网关）
+
+v5.1 的强制层是 opencode 插件——它依赖 hook 存在、语义不变、并且可靠。
+代价是三次真实教训（D9 插件格式 / D11 durable event schema / D13 只读环境）
+**全都来自"依赖别人的 hook"**。
+
+v6 把它下沉到**所有 Agent 的公共必经之路**：LLM API 调用本身。
+
+```
+Agent ──► 127.0.0.1:8787/v1 ──┬─ none        ──► 云端上游
+（任何 OpenAI 兼容客户端）      ├─ medium/high ──► 本地上游（改写 model + 摘掉远程工具）
+                              └─ 或 403 拒绝  （block 策略）
+```
+
+```bash
+python tools/gateway.py \
+    --cloud-upstream https://api.example.com/v1 \
+    --cloud-key-env MY_CLOUD_KEY \
+    --local-upstream http://127.0.0.1:11434/v1 \
+    --local-model "qwen3:35b" \
+    --policy reroute
+```
+
+然后把客户端的 `base_url` 指向 `http://127.0.0.1:8787/v1`。
+opencode 照旧能用，但它**不再是基座，只是适配器之一**。
+
+| 机制 | 说明 |
+|---|---|
+| **无声重路由** | 敏感会话改写到本地上游并改写 `model`——模型自己都不知道被降级了 |
+| **远程工具剥夺** | 敏感会话时把 `tools[]` 里的搜索/抓取工具**摘掉**。模型不是"被劝住"，是**没有能力调**。这条不依赖任何框架 hook，是整个 v6 里唯一一个框架绕不过的强制点 |
+| **fail-closed 的方向性** | 本地上游不可达 → 502，**绝不回落到云端**。网络故障必须朝"更私密"的方向倒 |
+
+响应头会带上判定，排查时不用猜：
+
+```
+x-privacy-gate: level=high policy=reroute inherited=true tools-stripped=web_search,web_fetch route=local session=e78d39a6
+```
+
+三种策略：`reroute`（默认，真管事）／`block`（403 拒绝）／
+`annotate`（**纯演练**：不改路由、不剥夺工具，只注入标注——先用它看策略想怎么判，再决定要不要真让它管事）。
+
+`GET /healthz` 会报告**会话键来源分布**：`fallback` 比例高说明客户端没带
+`x-session-id`。单人用无所谓；多人共用一个网关实例时必须配上，否则会话会互相污染。
+
+> **上游地址刻意不放进 `rules.json`。** 那是要提交、要分享、要被人抄走的**策略**文件；
+> 把本机 Ollama 的内网 IP 写进去，正好违反本项目自己的发布纪律。
+> 策略归策略，部署归部署。
+
 ## 目录结构
 
 ```
 ├── .opencode/plugins/privacy-gate.js  # 框架级门禁插件（四层防线的 1、2、3 层）
 ├── tools/rules_model.py               # 规则模型 v4：匹配原语 + 语境豁免 + lint（策略层契约）
 ├── tools/rules_engine.py              # 分级编排 + 多轮继承 + 决策日志
+├── tools/session.py                   # 会话状态（网关与适配器共用的会话键推导 + 继承）
+├── tools/gateway.py                   # ★ 传输层门禁：重路由 / 工具剥夺 / fail-closed（v6 核心）
 ├── tools/correct.py                   # 纠正回流（扩充 / 收窄 / 降级 / 豁免 + 回归用例）
 ├── tools/explain.py                   # 解释"这段话为什么被判成这个级别"
 ├── tools/stats.py                     # 决策日志统计（最吵的规则与关键词）
@@ -183,7 +233,8 @@ python check.py
 ├── prompts/worker.md                  # 本地执行 agent 的系统提示（含兜底路径 + 委派规则）
 ├── prompts/cloud.md                   # 云端 agent 的系统提示（非 none 即拒绝）
 ├── check.py                           # 一键体检（活体项目/发布包双布局自适应）
-├── test_routes.py                     # 回归测试
+├── test_routes.py                     # 分级回归测试
+├── test_gateway.py                    # 网关回归测试（含"绝不回落云端"）
 ├── data/                              # routing_log.jsonl / corrections.jsonl（运行时生成）
 ├── opencode.jsonc.example             # 配置模板（worker + cloud + provider 示例）
 ├── docs/                              # 设计文档（v1 方案 / v3 执行计划存档；v6 网关提案）

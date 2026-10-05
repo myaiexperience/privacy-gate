@@ -23,6 +23,8 @@ opencode 隐私门禁一键体检（check.py）
   6. Ollama 连通性    推理服务器可达 + 配置里的模型 tag 存在（不可达只告警，
                      不阻塞——云端模型不受影响）
   7. 回归测试         test_routes.py 全绿
+  7.5 网关回归        test_gateway.py 全绿：重路由 / 工具剥夺 / 会话继承 /
+                     fail-closed 方向性（本地上游挂了必须 502，绝不改走云端）
 
 用法:
   python 01-OpenCode配置/check.py      # 活体项目布局
@@ -877,6 +879,33 @@ def check_tests():
         record("回归测试", "FAIL", f"退出码 {r.returncode}，末尾输出: {last}")
 
 
+# ── 7.5 网关回归（传输层门禁）──────────────────────────────
+
+def check_gateway():
+    """网关回归测试。
+
+    这是 v6 的核心机制：**不依赖任何 Agent 框架**的强制层。它一旦坏了，
+    "哪些数据能出内网"就重新变回口头承诺——所以每次体检都要跑。
+    重点守的是 fail-closed 的方向性：本地上游不可达必须 502，绝不能改走云端。
+    """
+    path = _first_existing(os.path.join(CANON_DIR, "test_gateway.py"),
+                           os.path.join(PROJECT_ROOT, "test_gateway.py"))
+    if not os.path.isfile(path):
+        record("网关回归", "FAIL", f"test_gateway.py 不存在: {path}")
+        return
+    try:
+        r = run_py([path], CANON_DIR, timeout=300)
+    except Exception as e:
+        record("网关回归", "FAIL", f"调用异常: {e}")
+        return
+    lines = r.stdout.decode("utf-8", "replace").strip().splitlines()
+    last = lines[-1] if lines else ""
+    if r.returncode == 0:
+        record("网关回归", "PASS", last)
+    else:
+        record("网关回归", "FAIL", f"退出码 {r.returncode}，末尾输出: {last}")
+
+
 # ── 主流程 ─────────────────────────────────────────────────
 
 def main():
@@ -905,6 +934,7 @@ def main():
     if isinstance(cfg, dict):
         check_ollama(cfg, gcfg)
     check_tests()
+    check_gateway()
 
     print("=" * 60)
     fails = [r for r in results if r[1] == "FAIL"]
