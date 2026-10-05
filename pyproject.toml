@@ -24,6 +24,7 @@ dependencies = []
 
 [project.urls]
 Repository = "https://gitee.com/playing-with-ai-x/privacy-gate"
+Mirror = "https://github.com/myaiexperience/privacy-gate"
 "Live demo" = "https://www.modelscope.cn/studios/xysrai/privacy-gate"
 
 [project.scripts]

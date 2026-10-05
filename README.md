@@ -351,6 +351,7 @@ privacy-gate gateway --local-upstream http://127.0.0.1:11434/v1 --local-model "q
 ## 仓库与反馈
 
 - 主仓库（Gitee）：<https://gitee.com/playing-with-ai-x/privacy-gate>
+- 镜像（GitHub）：<https://github.com/myaiexperience/privacy-gate>
 - 英文 README：[README.en.md](README.en.md)（给 GitHub 镜像与国际读者）
 - 在线演示（魔搭创空间）：<https://www.modelscope.cn/studios/xysrai/privacy-gate>
   —— 演示源码在魔搭侧单独维护（创空间的「文件」页可看），但其中的分级引擎、

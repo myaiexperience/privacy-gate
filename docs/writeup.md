@@ -222,9 +222,10 @@ shim 再 import 同名模块，拿到的是自己的半成品 → 循环导入�
 
 ## 代码
 
-- 代码仓库（Gitee）：<https://gitee.com/playing-with-ai-x/privacy-gate>
+- 代码仓库（Gitee 主）：<https://gitee.com/playing-with-ai-x/privacy-gate>
+- 代码仓库（GitHub 镜像）：<https://github.com/myaiexperience/privacy-gate>
 - 在线演示（魔搭创空间，纯规则、不联网）：<https://www.modelscope.cn/studios/xysrai/privacy-gate>
-- 决策日志：[DECISIONS.md](https://gitee.com/playing-with-ai-x/privacy-gate/blob/master/DECISIONS.md) —— 20 条决策，每条附当时的实测原因
+- 决策日志：[DECISIONS.md](https://gitee.com/playing-with-ai-x/privacy-gate/blob/master/DECISIONS.md) —— 每条决策都附当时的实测原因
 
 验证情况：全量体检全绿（规则契约、收窄路径、零依赖断言、泄露面审计、文档命令核对）、
 144 条断言（分级 61 / 网关 38 / 适配器 45）、可 `pip install` 且 `dependencies` 为空。

@@ -19,6 +19,7 @@ Your agent ──► 127.0.0.1:8787/v1 ──┬─ none        ──► cloud 
 The agent doesn't even know it was downgraded. That is the point.
 
 **Primary repo: <https://gitee.com/playing-with-ai-x/privacy-gate>**
+**Mirror: <https://github.com/myaiexperience/privacy-gate>**
 (GitHub mirror pending — the author's network reaches Gitee first.)
 
 **Live demo (ModelScope Space):** <https://www.modelscope.cn/studios/xysrai/privacy-gate>
