@@ -264,20 +264,14 @@ def merged_models(cfg, gcfg):
     return {**(glob.get("models") or {}), **(proj.get("models") or {})}
 
 
-def check_config(gcfg):
-    if not os.path.isfile(CONFIG_PATH):
-        if os.path.isfile(CONFIG_EXAMPLE_PATH):
-            record("配置解析", "WARN",
-                   "未找到 opencode.jsonc（发布包布局）——复制 opencode.jsonc.example 为 opencode.jsonc 并填好 Ollama 地址后重跑")
-        else:
-            record("配置解析", "WARN", "未找到 opencode.jsonc")
-        return None
-    try:
-        cfg = load_jsonc(CONFIG_PATH)
-    except Exception as e:
-        record("配置解析", "FAIL", f"opencode.jsonc 解析失败: {e}")
-        return None
+def _config_problems(cfg, gcfg, base):
+    """校验一份 opencode.jsonc 的**内容**，返回问题列表。
 
+    ★ 抽出来是为了让**示例文件也走同一套规则**。发布包布局下 adopters 是照抄
+    `opencode.jsonc.example` 起步的，而原先这里只检查"示例**存在**不存在"，
+    从不检查"示例**本身**对不对"——照抄一份坏配置的人，要很久以后才会发现。
+    （同族的洞见 D29-D32：守着一个被发布的产物，却没人验它。）
+    """
     problems = []
     agents = cfg.get("agent") or {}
     for name in ("worker", "cloud"):
@@ -294,7 +288,6 @@ def check_config(gcfg):
         if tag not in models:
             problems.append(f"provider.ollama.models（项目+全局合并）里没有 {tag!r}")
 
-    base = os.path.dirname(CONFIG_PATH)
     for name in ("worker", "cloud"):
         prompt = (agents.get(name) or {}).get("prompt", "")
         m = re.search(r"\{file:([^}]+)\}", prompt or "")
@@ -315,7 +308,38 @@ def check_config(gcfg):
         unknown = set(perms) - KNOWN_PERMISSIONS
         if unknown:
             problems.append(f"{name} 含未知 permission 键: {sorted(unknown)}")
+    return problems
 
+
+def check_config(gcfg):
+    if not os.path.isfile(CONFIG_PATH):
+        if os.path.isfile(CONFIG_EXAMPLE_PATH):
+            try:
+                ex_problems = _config_problems(
+                    load_jsonc(CONFIG_EXAMPLE_PATH), gcfg,
+                    os.path.dirname(CONFIG_EXAMPLE_PATH))
+            except Exception as e:
+                ex_problems = [f"示例解析失败: {e}"]
+            if ex_problems:
+                # 示例坏了要**失败**：它是每个 adopters 的起点，不是普通文档
+                record("配置解析", "FAIL",
+                       "opencode.jsonc.example 本身有问题（别人会照抄它）：%s"
+                       % "; ".join(ex_problems))
+            else:
+                record("配置解析", "WARN",
+                       "未找到 opencode.jsonc（发布包布局）——**示例本身已校验通过**"
+                       "（解析 OK / worker+cloud 齐全 / prompt 引用存在）；"
+                       "复制 opencode.jsonc.example 为 opencode.jsonc 并填好 Ollama 地址后重跑")
+        else:
+            record("配置解析", "WARN", "未找到 opencode.jsonc")
+        return None
+    try:
+        cfg = load_jsonc(CONFIG_PATH)
+    except Exception as e:
+        record("配置解析", "FAIL", f"opencode.jsonc 解析失败: {e}")
+        return None
+
+    problems = _config_problems(cfg, gcfg, os.path.dirname(CONFIG_PATH))
     if problems:
         record("配置解析", "FAIL", "; ".join(problems))
     else:
