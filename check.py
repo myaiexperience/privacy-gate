@@ -16,6 +16,8 @@ opencode 隐私门禁一键体检（check.py）
                      重复 id、悬空豁免作用域、层级冲突）
   3.7 收窄路径       remove / demote / exempt 三种纠正在临时规则库上真实跑一遍，
                      含"豁免不得溢出到同规则其他模式"这条安全回归
+  3.8 可观测工具     explain / stats 在临时数据上真实跑一遍；含隐私哨兵：
+                     统计报告的输出里绝不能出现日志中的 user_input
   4. 插件检查         node --check 语法 + "导出必须是函数"契约（桌面端加载要求）
   5. 状态文件         privacy-gate-state.json 合法、无引擎失败残留的假 medium
   6. Ollama 连通性    推理服务器可达 + 配置里的模型 tag 存在（不可达只告警，
@@ -624,6 +626,138 @@ def check_correct_actions():
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+# ── 3.8 可观测性工具（explain / stats）──────────────────────
+
+def check_observability():
+    """explain / stats 在临时数据上真实跑一遍。
+
+    为什么必须守：v6 默认策略会把敏感会话**无声重路由**到本地弱模型，
+    误命中从"拦一下你看得见"变成"悄悄降级你不知道"。可观测性是那个取舍的唯一补偿——
+    这两个工具坏了，代价就从"看得到"变成"看不到"。
+
+    另外钉一条隐私哨兵：日志里含用户原文，但统计报告**绝不能**把它打出来。
+    """
+    tmp = tempfile.mkdtemp(prefix="privacy-gate-observe-")
+    problems, detail = [], []
+    try:
+        tools_tmp = os.path.join(tmp, "tools")
+        os.makedirs(tools_tmp, exist_ok=True)
+        tools_src = os.path.dirname(SHIM_CORRECT)
+        for name in sorted(os.listdir(tools_src)):
+            if name.endswith(".py"):
+                shutil.copy2(os.path.join(tools_src, name), os.path.join(tools_tmp, name))
+
+        rules_path = os.path.join(tmp, "rules.json")
+        synthetic = {
+            "schema": "v4",
+            "rules": [
+                {"id": "high-default", "level": "high", "action": "block_remote",
+                 "match": {"type": "substring", "patterns": ["保密", "收购"]}},
+                {"id": "medium-default", "level": "medium", "action": "prefer_local",
+                 "match": {"type": "substring", "patterns": ["预算"]}},
+            ],
+            "exceptions": [
+                {"id": "news", "demote_to": "none",
+                 "applies_to": [{"rule": "high-default", "patterns": ["收购"]}],
+                 "when": {"type": "substring", "patterns": ["新闻"]}},
+            ],
+            "topic_shift_keywords": ["换个话题"],
+            "remote_tool_patterns": ["*web*"],
+        }
+        with open(rules_path, "w", encoding="utf-8", newline="\n") as f:
+            json.dump(synthetic, f, ensure_ascii=False, indent=2)
+            f.write("\n")
+
+        def explain_of(text):
+            r = run_py([os.path.join(tools_tmp, "explain.py"), "--json",
+                        "--rules", rules_path, text], tmp, timeout=60)
+            try:
+                return json.loads(r.stdout.decode("utf-8", "replace").strip()), r.returncode
+            except Exception:
+                return None, r.returncode
+
+        # 1) 豁免生效
+        exp, code = explain_of("看看收购的公开新闻")
+        if code != 0 or not exp:
+            problems.append("explain 调用失败：exit=%s" % code)
+        else:
+            if exp.get("level") != "none":
+                problems.append("explain 判级错：期望 none，实得 %s" % exp.get("level"))
+            eff = [e for e in exp.get("exceptions", []) if e.get("effective")]
+            if not eff:
+                problems.append("explain 没标出生效的豁免")
+            elif not any("收购" in s.get("terms", []) for e in eff for s in e.get("suppressed", [])):
+                problems.append("explain 没说明豁免掐掉了哪个模式")
+            detail.append("explain 能说明豁免生效")
+
+        # 2) 豁免不得溢出（同一条规则里的其他模式必须保住）
+        exp2, code2 = explain_of("帮我写保密协议，顺便看看收购的新闻")
+        if code2 != 0 or not exp2:
+            problems.append("explain 溢出用例调用失败：exit=%s" % code2)
+        else:
+            if exp2.get("level") != "high":
+                problems.append("豁免溢出：期望 high，实得 %s" % exp2.get("level"))
+            elif "保密" not in (exp2.get("matched_keywords") or []):
+                problems.append("豁免溢出：保密的贡献被连带掐掉了")
+            detail.append("explain 反映「豁免不溢出」")
+
+        # 3) stats：聚合正确，且**绝不泄漏 user_input**
+        canary = "SENTINEL-LEAK-CANARY"
+        log_path = os.path.join(tmp, "routing_log.jsonl")
+        rows = [
+            {"timestamp": "2026-09-01T00:00:00Z", "session_id": "s1", "source": "plugin",
+             "user_input": canary, "level": "high", "matched_keywords": ["保密"],
+             "matched_rules": [{"id": "high-default", "level": "high"}],
+             "inherited": False, "topic_shift": False, "effective_level": "high"},
+            {"timestamp": "2026-09-01T00:01:00Z", "session_id": "s1", "source": "plugin",
+             "user_input": canary, "level": "none", "matched_keywords": [],
+             "inherited": True, "topic_shift": False, "effective_level": "high"},
+            {"timestamp": "2026-09-01T00:02:00Z", "session_id": "s2", "source": "cli",
+             "user_input": canary, "level": "medium", "matched_keywords": ["预算"],
+             "inherited": False, "topic_shift": True, "effective_level": "medium"},
+        ]
+        with open(log_path, "w", encoding="utf-8", newline="\n") as f:
+            for row in rows:
+                f.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+        rj = run_py([os.path.join(tools_tmp, "stats.py"), "--json", "--log", log_path],
+                    tmp, timeout=60)
+        try:
+            st = json.loads(rj.stdout.decode("utf-8", "replace").strip())
+        except Exception:
+            st = None
+        if rj.returncode != 0 or not st:
+            problems.append("stats --json 调用失败：exit=%s" % rj.returncode)
+        else:
+            if st.get("total") != 3:
+                problems.append("stats 总数错：期望 3，实得 %s" % st.get("total"))
+            if st.get("levels", {}).get("high") != 1:
+                problems.append("stats 级别分布错：high 期望 1，实得 %s" % st.get("levels"))
+            if st.get("inherited") != 1 or st.get("topic_shift") != 1:
+                problems.append("stats 继承/话题切换计数错：%s/%s"
+                                % (st.get("inherited"), st.get("topic_shift")))
+            if st.get("with_rule_trace") != 1:
+                problems.append("stats 规则级溯源覆盖数错：期望 1，实得 %s"
+                                % st.get("with_rule_trace"))
+            detail.append("stats 聚合正确")
+
+        rt = run_py([os.path.join(tools_tmp, "stats.py"), "--log", log_path], tmp, timeout=60)
+        text_out = rt.stdout.decode("utf-8", "replace")
+        if canary in text_out:
+            problems.append("隐私哨兵被触发：stats 的文本输出里出现了 user_input！")
+        else:
+            detail.append("stats 未泄漏 user_input")
+
+        if problems:
+            record("可观测工具", "FAIL", "; ".join(problems))
+        else:
+            record("可观测工具", "PASS", "；".join(detail))
+    except Exception as e:
+        record("可观测工具", "FAIL", "调用异常: %s" % e)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 # ── 4. 插件检查 ────────────────────────────────────────────
 
 def check_plugin():
@@ -765,6 +899,7 @@ def main():
     check_correct_write()
     check_correct_actions()
     check_rules_schema()
+    check_observability()
     check_plugin()
     check_state()
     if isinstance(cfg, dict):
