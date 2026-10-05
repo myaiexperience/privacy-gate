@@ -149,11 +149,23 @@ function classify(directory, sessionID, prev, text) {
     )
     if (r.error) throw r.error
     const data = JSON.parse((r.stdout || "").trim())
-    const level = data.effective_level === "high" || data.effective_level === "medium"
-      ? data.effective_level
-      : "none"
+    // ⚠️ 只有拿到一个**能识别**的级别才算成功。
+    //
+    // 这里曾经写成「不是 high/medium 就当作 none」，那是一条 fail-open 路径：
+    // 引擎字段改名、引擎打印 {"error": ...}、或者输了别的 JSON，
+    // 门禁就会把远程工具**全打开**——而门禁失效时放开远程访问，
+    // 正是本项目最不能有的失败方向（同理见 DECISIONS D15 的 fail-closed 方向性）。
+    //
+    // 教训：fail-closed 不只是"出错时怎么办"，还包括"看不懂时怎么办"。
+    if (!LEVELS.has(data.effective_level)) {
+      console.warn(
+        `[privacy-gate] 引擎输出里没有可识别的 effective_level，按 medium（默认保守）: ` +
+        `${JSON.stringify(data).slice(0, 160)}`,
+      )
+      return fallback()
+    }
     return {
-      level,
+      level: data.effective_level,
       matched: Array.isArray(data.matched_keywords) ? data.matched_keywords : [],
       inherited: Boolean(data.inherited),
       topicShift: Boolean(data.topic_shift),

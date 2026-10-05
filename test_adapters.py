@@ -21,6 +21,7 @@
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -219,6 +220,62 @@ def test_hook(tmp):
           code == 0 and not out.strip(), "exit=%s out=%r" % (code, out[:60]))
 
 
+# ── opencode 插件 ↔ 引擎 字段契约 ─────────────────────────
+
+def test_plugin_engine_contract():
+    """插件（JS）从引擎（Python）的 stdout 里读哪些字段？引擎必须都给到。
+
+    这是本项目里最容易**静默失效**的一处接口：两边各有一半测试，
+    而合起来的那条缝没人测——字段一改名，插件不报错，只是悄悄降级。
+
+    所以这里**从插件源码里提取它实际读的字段名**，而不是在测试里抄一份清单：
+    抄一份的话，插件加了新字段而引擎没提供，测试照样是绿的。
+
+    另外守两条更基本的：
+    - 引擎 stdout 必须是**纯 JSON**（插件直接 JSON.parse；往 stdout 多打一行就炸）
+    - 拿不到可识别的级别时必须 fail-closed，不能当成 none
+    """
+    plugin = os.path.join(_HERE, ".opencode", "plugins", "privacy-gate.js")
+    engine = os.path.join(_HERE, "tools", "rules_engine.py")
+    if not (os.path.isfile(plugin) and os.path.isfile(engine)):
+        check("插件↔引擎字段契约", False, "插件或引擎文件不存在")
+        return
+
+    src = open(plugin, encoding="utf-8").read()
+    fields = sorted(set(re.findall(r"\bdata\.([A-Za-z_][A-Za-z0-9_]*)", src)))
+    check("能从插件源码里提取出它读取的字段", bool(fields),
+          "字段：" + ("、".join(fields) if fields else "（一个都没提取到）"))
+
+    for text, want in (("帮我写一份保密协议", "high"), ("今天天气怎么样", "none")):
+        r = subprocess.run(
+            [sys.executable, engine, "--json", "--stdin"],
+            input=text.encode("utf-8"), capture_output=True, timeout=60,
+            env=dict(os.environ, PYTHONUTF8="1", PYTHONIOENCODING="utf-8"))
+        out = r.stdout.decode("utf-8", "replace")
+        try:
+            data = json.loads(out.strip())
+        except Exception as e:
+            check("引擎 stdout 是纯 JSON（%s）" % text[:6], False, str(e)[:90])
+            continue
+        missing = [f for f in fields if f not in data]
+        check("引擎提供了插件读取的全部字段（%s）" % text[:6], not missing,
+              ("缺：" + "、".join(missing)) if missing else "字段齐全")
+        check("effective_level 可识别（%s）" % text[:6],
+              data.get("effective_level") == want,
+              "实得 %r，期望 %r" % (data.get("effective_level"), want))
+
+    fb = re.search(r"function fallback\(\)\s*\{[^}]*level:\s*\"(\w+)\"", src)
+    check("插件的兜底级别是 medium（fail-closed）",
+          bool(fb) and fb.group(1) == "medium",
+          ("兜底级别 = %s" % fb.group(1)) if fb else "没找到 fallback()")
+    # 这条是 fail-open 的回归：曾经写成「不是 high/medium 就当作 none」，
+    # 于是引擎字段改名 / 引擎打印 {"error": ...} 都会把远程工具全打开。
+    has_guard = "LEVELS.has(data.effective_level)" in src
+    check("插件不再把「看不懂的级别」当成 none（fail-open 回归）", has_guard,
+          "识别到 LEVELS.has(...) 判定" if has_guard
+          else "插件里找不到 LEVELS.has(data.effective_level)——fail-open 路径又回来了")
+
+
 # ── 裸 CLI ─────────────────────────────────────────────────
 
 def test_cli(tmp):
@@ -261,6 +318,10 @@ def main():
         print("Claude Code hook 适配器")
         print("-" * 60)
         test_hook(tmp)
+        print("-" * 60)
+        print("opencode 插件 ↔ 引擎 字段契约")
+        print("-" * 60)
+        test_plugin_engine_contract()
         print("-" * 60)
         print("裸 CLI 适配器")
         print("-" * 60)
