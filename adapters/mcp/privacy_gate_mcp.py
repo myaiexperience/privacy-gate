@@ -41,6 +41,7 @@ _TOOLS = os.path.abspath(os.path.join(_HERE, "..", "..", "tools"))
 sys.path.insert(0, _TOOLS)
 
 import rules_model  # noqa: E402
+import paths  # noqa: E402
 
 # 本适配器支持（= 真的读过其规范、并只用其中最基础的 tools 能力）的协议版本。
 #
@@ -263,11 +264,8 @@ def handle(msg):
 
 
 def main():
-    for stream in (sys.stdin, sys.stdout):
-        try:
-            stream.reconfigure(encoding="utf-8", errors="replace")
-        except Exception:
-            pass
+    # 三个流都要（原先只配了 stdin/stdout）；统一走 paths 里那一份。
+    paths.ensure_utf8_stdio()
     out = sys.stdout
     for line in sys.stdin:
         line = line.strip()

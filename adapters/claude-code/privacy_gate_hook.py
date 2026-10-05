@@ -46,6 +46,7 @@ sys.path.insert(0, _TOOLS)
 import rules_engine  # noqa: E402
 import rules_model  # noqa: E402
 import session as session_mod  # noqa: E402
+import paths  # noqa: E402
 
 ROOT = os.path.abspath(os.path.join(_HERE, "..", ".."))
 RULES_PATH = os.environ.get("PRIVACY_GATE_RULES", os.path.join(ROOT, "keywords", "rules.json"))
@@ -129,11 +130,11 @@ def allow(reason=""):
 
 
 def main():
-    for s in (sys.stdout, sys.stderr):
-        try:
-            s.reconfigure(encoding="utf-8", errors="replace")
-        except Exception:
-            pass
+    # ★ 注意是**三个**流。这里原先只重配了 stdout/stderr，漏了 stdin——
+    # 于是在 cp1252 控制台下**读中文输入就解码失败**，落到"读不懂输入"的兜底分支。
+    # 之所以只是"变慢"而不是"变错"，是因为那个兜底是 fail-closed 的 ask（见 D26）；
+    # 但换成别的入口就会静默判成"无决策"。统一走 paths 里那一份。
+    paths.ensure_utf8_stdio()
 
     try:
         raw = sys.stdin.read()

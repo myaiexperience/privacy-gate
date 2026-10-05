@@ -505,8 +505,8 @@ def check_correct_write():
             problems.append("新关键词未写入规则库")
         if after.count(b"\n") != before.count(b"\n") + 1:
             problems.append(
-                f"规则库行数应只 +1，实得 {before.count(b'\\n')} → {after.count(b'\\n')}"
-                "（疑似整文件被重写）"
+                "规则库行数应只 +1，实得 %d → %d（疑似整文件被重写）"
+                % (before.count(b"\n"), after.count(b"\n"))
             )
         if problems:
             record("纠正回流写盘", "FAIL", "; ".join(problems))

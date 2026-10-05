@@ -142,6 +142,8 @@ def prune_dangling_scopes(rules):
 
 
 def main():
+    # 输出是中文 JSON；cp1252 控制台（如 GitHub 的 windows runner）会直接崩
+    paths.ensure_utf8_stdio()
     # Windows 下 stdin 默认按 ANSI 代码页解码，调用方传的是 UTF-8。
     # 按字节读再显式解码，避免乱码与 surrogate 字符导致的 UnicodeEncodeError。
     raw = sys.stdin.buffer.read().decode("utf-8", errors="replace").strip()

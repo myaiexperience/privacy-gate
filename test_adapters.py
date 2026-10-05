@@ -28,6 +28,8 @@ import sys
 import tempfile
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(_HERE, "tools"))
+import paths  # noqa: E402
 MCP = os.path.join(_HERE, "adapters", "mcp", "privacy_gate_mcp.py")
 HOOK = os.path.join(_HERE, "adapters", "claude-code", "privacy_gate_hook.py")
 CLI = os.path.join(_HERE, "privacy_gate.py")
@@ -368,6 +370,7 @@ def test_cli(tmp):
 
 
 def main():
+    paths.ensure_utf8_stdio()   # 中文输出；cp1252 控制台（如 GitHub 的 windows runner）会崩
     tmp = tempfile.mkdtemp(prefix="privacy-gate-adapters-")
     try:
         print("-" * 60)

@@ -17,6 +17,13 @@ jobs:
   test:
     name: py${{ matrix.python }} / ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
+    # 双保险：脚本自己会 reconfigure 成 UTF-8（paths.ensure_utf8_stdio），
+    # 这里再让解释器一开始就按 UTF-8 走。
+    # 起因：windows runner 的控制台是 cp1252，`python test_routes.py` 打印中文时
+    # 以 `UnicodeEncodeError: 'charmap' codec` 崩掉——而本机（UTF-8 管道）永远看不到。
+    env:
+      PYTHONUTF8: "1"
+      PYTHONIOENCODING: "utf-8"
     strategy:
       fail-fast: false
       matrix:

@@ -34,6 +34,27 @@ def package_root():
     return os.path.dirname(_HERE)
 
 
+def ensure_utf8_stdio():
+    """把三个标准流重配成 UTF-8。**所有入口脚本都该先调它。**
+
+    为什么需要：Windows 控制台默认按 ANSI 代码页编解码（中文系统是 cp936、
+    GitHub 的 windows-latest runner 是 **cp1252**），而本项目到处往 stdout 打中文——
+    不重配置时轻则乱码，重则 `UnicodeEncodeError: 'charmap' codec` 直接崩。
+
+    ★ 这条是 CI 报出来的，不是本机：本机的终端/管道是 UTF-8，永远看不到。
+    `test_routes.py` 在 github 的 windows 作业上就是这么崩的。
+
+    ★ 而且它暴露了"散在多处必然会漏改一个"：这个四行的写法原先散在七八个文件里，
+    于是**三个测试脚本、correct.py 和根转发脚本全漏了**。所以收到这里一份。
+    （老文件里那些内联副本还能用，逐步换成这个即可。）
+    """
+    for stream in (sys.stdin, sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
+
 def rules_candidates():
     """按优先级列出候选路径（含环境变量给出的那个）。"""
     out = []

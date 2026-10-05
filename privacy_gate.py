@@ -16,6 +16,9 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "tools"))
 import cli  # noqa: E402
+import paths  # noqa: E402
+
+paths.ensure_utf8_stdio()   # 中文输出；cp1252 控制台会崩
 
 if __name__ == "__main__":
     sys.exit(cli.main())

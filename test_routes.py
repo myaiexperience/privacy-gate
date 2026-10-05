@@ -21,6 +21,7 @@ _ROOT = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(_ROOT, "tools"))
 import rules_engine  # noqa: E402
 import rules_model  # noqa: E402
+import paths  # noqa: E402
 
 ENGINE = rules_engine
 MODEL = rules_model
@@ -336,6 +337,7 @@ def check_log_failsoft():
 
 def main():
     global PASS, FAIL
+    paths.ensure_utf8_stdio()   # 中文输出；cp1252 控制台（如 GitHub 的 windows runner）会崩
     print("=" * 60)
     print("规则路由回归测试 v5")
     print("=" * 60)

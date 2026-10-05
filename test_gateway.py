@@ -32,6 +32,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 _HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(_HERE, "tools"))
 import gateway  # noqa: E402
+import paths  # noqa: E402
 
 PASS = 0
 FAIL = 0
@@ -206,6 +207,7 @@ REMOTE_TOOLS = [
 
 
 def main():
+    paths.ensure_utf8_stdio()   # 中文输出；cp1252 控制台（如 GitHub 的 windows runner）会崩
     tmp = tempfile.mkdtemp(prefix="privacy-gate-gwtest-")
     crashed = None
     try:
