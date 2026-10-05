@@ -381,8 +381,9 @@ privacy-gate gateway --local-upstream http://127.0.0.1:11434/v1 --local-model "q
   > 详见 [DECISIONS.md](DECISIONS.md) D21
 - 早期设计存档在 [`docs/`](docs)，历次迭代的取舍见 [DECISIONS.md](DECISIONS.md)
 - **项目复盘长文**：[docs/writeup.md](docs/writeup.md) —— 六次迭代的完整记录，
-  包括我自己设计里的五个漏洞。**这份是单一来源**，发到各平台的内容从它复制
+  包括我自己设计里被推翻的那些地方。**这份是单一来源**，发到各平台的内容从它复制
   （平台上那份不会被任何检查发现，已经因此过期过一次）
+  - 已发布：[知乎](https://zhuanlan.zhihu.com/p/2090448038653322858)（2026-10）
 - 问题与 PR：欢迎提 Issue。这是单人 homelab 项目，回复可能不快，但每条都会看——
   尤其是"诚实清单"里那几条该怎么补。
 
