@@ -1,0 +1,117 @@
+name: Sync from Gitee
+
+# 为什么要这个 workflow
+# ----------------------
+# Gitee 是主仓库，GitHub 是镜像。但**从开发机往 GitHub 推经常不通**——
+# 有一天断了四次，结果 GitHub 上停在一个 **CI 是红的**提交上，
+# 而修复早就躺在 Gitee 里了。"发布"被一条控制不了的链路卡住，很难受。
+#
+# 这个 workflow 把那条链路搬到 **GitHub 自己的机器**上：
+# 你只管推 Gitee，GitHub 这边定时（或手动点一下）自己来拉。
+# Gitee 仓库是公开的，所以**不需要任何密钥**，只用 GitHub 自己发的 GITHUB_TOKEN。
+#
+# 三条有意的约定
+# --------------
+# 1. **只做快进（fast-forward）**：两边一旦分叉就地失败并喊出来，**绝不 force**。
+#    悄悄覆盖掉一个提交，比"没同步上"严重得多。
+# 2. **先验后推**：同步下来的树要先跑通体检，绿了才允许推上去。
+# 3. 正因如此（GITHUB_TOKEN 推的提交**不会再触发 CI**），`ci.yml` 另加了一条
+#    每日定时——让同步过来的提交也能走到 3.9/3.12/3.13 × Linux/Windows 那六格。
+
+on:
+  schedule:
+    - cron: "17 */6 * * *" # 每 6 小时一次（避开整点，减少排队）
+  workflow_dispatch: # 也可以手动点
+
+permissions:
+  contents: write
+
+concurrency:
+  group: gitee-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main（要全历史，才判断得了快进）
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: main
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: 从 Gitee 取 master
+        run: |
+          set -euo pipefail
+          git remote add gitee https://gitee.com/playing-with-ai-x/privacy-gate.git
+          git fetch --no-tags gitee master
+          echo "GitHub main : $(git rev-parse --short HEAD)"
+          echo "Gitee master: $(git rev-parse --short gitee/master)"
+
+      - name: 快进到 Gitee 的位置（分叉就失败，绝不 force）
+        run: |
+          set -euo pipefail
+          before=$(git rev-parse HEAD)
+          # 四种情形要分开处理。别图省事只写 merge --ff-only：
+          # "相等"和"GitHub 反而领先"在它眼里都是成功，但那两件事含义完全不同。
+          if git merge-base --is-ancestor HEAD gitee/master; then
+            # ① Gitee 领先（或相等）→ 可以安全快进
+            git merge --ff-only gitee/master
+            after=$(git rev-parse HEAD)
+            if [ "$before" = "$after" ]; then
+              echo "② 已经是最新（$before），本次无需同步。"
+              echo "SYNCED=0" >> "$GITHUB_ENV"
+            else
+              echo "① 需要同步：$before -> $after"
+              echo "SYNCED=1" >> "$GITHUB_ENV"
+              echo "SYNCED_FROM=$(git rev-parse --short "$before")" >> "$GITHUB_ENV"
+              echo "SYNCED_TO=$(git rev-parse --short "$after")" >> "$GITHUB_ENV"
+            fi
+          elif git merge-base --is-ancestor gitee/master HEAD; then
+            # ③ GitHub 领先 Gitee：有人直接提交到了 GitHub。
+            #    本 workflow 是**单向**的，不会把这些提交回推 Gitee——
+            #    但也不能装作没看见，否则两边越漂越远，下次就直接分叉失败了。
+            echo "::warning::GitHub 比 Gitee 更新（有人直接提交到了 GitHub）。"
+            echo "  本 workflow 只从 Gitee 单向同步，不会回推。"
+            echo "  请把这些提交也补到 Gitee，否则两边会越来越远。"
+            echo "SYNCED=0" >> "$GITHUB_ENV"
+          else
+            # ④ 真正分叉：各有对方没有的提交
+            echo "::error::GitHub 与 Gitee 已经分叉，本 workflow 不会强行覆盖。"
+            echo "  这是有意的：悄悄 force 掉一个提交，比没同步上严重得多。"
+            echo "  请人工确认：在 Gitee 侧 rebase，或在这边手动合并后再跑一次。"
+            exit 1
+          fi
+
+      - name: 先验（绿了才允许推）
+        if: env.SYNCED == '1'
+        run: |
+          set -euo pipefail
+          # check.py 里已经包含三套回归（分级 / 网关 / 适配器）与全部机器守卫
+          python check.py
+
+      - name: 推送到 main
+        if: env.SYNCED == '1'
+        run: |
+          set -euo pipefail
+          git push origin HEAD:main
+          echo "已同步 $SYNCED_FROM -> $SYNCED_TO"
+
+      - name: 小结
+        if: always()
+        run: |
+          {
+            echo "### Gitee -> GitHub 同步"
+            echo ""
+            if [ "${SYNCED:-0}" = "1" ]; then
+              echo "- 同步 \`$SYNCED_FROM\` -> \`$SYNCED_TO\`（先跑通体检再推）"
+            else
+              echo "- 无需同步（GitHub 已与 Gitee 一致）"
+            fi
+            echo "- Gitee: https://gitee.com/playing-with-ai-x/privacy-gate"
+          } >> "$GITHUB_STEP_SUMMARY"

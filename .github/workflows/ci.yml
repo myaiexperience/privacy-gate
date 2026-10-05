@@ -12,6 +12,11 @@ on:
     branches: [master, main]
   pull_request:
   workflow_dispatch:
+  # 每日一次：因为 `sync-from-gitee.yml` 是用 GITHUB_TOKEN 推的，而
+  # **GITHUB_TOKEN 触发的 push 不会再触发 workflow**——那条同步链路上的提交
+  # 走不到这里。加上定时，它们也能挨到 3.9/3.12/3.13 × Linux/Windows 这六格。
+  schedule:
+    - cron: "23 3 * * *"
 
 jobs:
   test:
