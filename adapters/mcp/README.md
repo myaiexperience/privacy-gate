@@ -54,8 +54,18 @@ echo '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"classify_t
 
 - 传输：stdio，行分隔的 JSON-RPC 2.0
 - 实现 `initialize` / `notifications/initialized` / `ping` / `tools/list` / `tools/call`
-- `initialize` **回显客户端请求的 protocolVersion**：我们只用最基础的 tools 能力，
-  回显比硬编码一个版本号更兼容（客户端会拒绝它不认识的版本）
+- `initialize` **按规范协商** protocolVersion：客户端请求的版本在支持列表里就回同一个，
+  否则回**我们自己支持的最新版本**。支持列表为
+  `2025-06-18` / `2025-03-26` / `2024-11-05`（我们只用最基础的 tools 能力，
+  这几个版本在这部分是稳定的）。
+
+  > ⚠️ 以前这里写的是"**回显客户端请求的 protocolVersion**，回显比硬编码更兼容"——
+  > **那是错的**。规范（lifecycle）原文是 MUST：*"If the server supports the requested
+  > protocol version, it MUST respond with the same version. Otherwise, the server MUST
+  > respond with another protocol version it supports."*
+  > 回显等于宣称自己懂一个没读过的规范版本；而规范里"客户端若不支持服务端回的版本
+  > SHOULD 断开"这条保护，正好被它废掉。现在有断言守着（含"不支持的版本不能被回显"）。
+
 - 工具内部异常回 `isError: true` 而不是让连接崩掉；协议层异常回 JSON-RPC 标准错误码
   （`-32700` 解析失败 / `-32600` 非法请求 / `-32601` 未实现 / `-32602` 参数错 / `-32603` 内部错误）
 - stdout 只走协议，日志走 stderr

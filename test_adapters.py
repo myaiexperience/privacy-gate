@@ -81,13 +81,31 @@ def test_mcp():
 
     by_id = {r.get("id"): r for r in resp if "id" in r}
     r1 = by_id.get(1, {}).get("result") or {}
-    check("initialize 回显客户端协议版本",
+    check("initialize 对支持的版本回同一个（2025-03-26）",
           r1.get("protocolVersion") == "2025-03-26", str(r1.get("protocolVersion")))
     check("initialize 声明 tools 能力", "tools" in (r1.get("capabilities") or {}))
     check("initialize 返回 serverInfo",
           (r1.get("serverInfo") or {}).get("name") == "privacy-gate",
           str(r1.get("serverInfo")))
     check("通知不产生响应（只有 2 条响应）", len(resp) == 2, "收到 %d 条" % len(resp))
+
+    # ★ 版本协商：规范要求"不支持就回一个自己支持的版本"，**不是回显**。
+    #   （以前实现回显任何版本，等于宣称自己懂一个没读过的规范版本；
+    #     而规范里"客户端若不支持服务端回的版本应当断开"这条保护正好被它废掉。）
+    _, rv, _ = rpc([{"jsonrpc": "2.0", "id": 9, "method": "initialize",
+                     "params": {"protocolVersion": "2099-01-01",
+                                "capabilities": {}, "clientInfo": {"name": "future", "version": "1"}}}])
+    got = ((rv[0] if rv else {}) or {}).get("result") or {}
+    check("★initialize 不回显不支持的版本（规范 MUST）",
+          got.get("protocolVersion") != "2099-01-01",
+          "回的是 %s" % got.get("protocolVersion"))
+    check("★initialize 回一个自己支持的版本",
+          got.get("protocolVersion") in ("2025-06-18", "2025-03-26", "2024-11-05"),
+          str(got.get("protocolVersion")))
+    _, rn, _ = rpc([{"jsonrpc": "2.0", "id": 10, "method": "initialize", "params": {}}])
+    gotn = ((rn[0] if rn else {}) or {}).get("result") or {}
+    check("initialize 没给版本时回最新支持的版本",
+          gotn.get("protocolVersion") == "2025-06-18", str(gotn.get("protocolVersion")))
 
     r2 = by_id.get(2, {}).get("result") or {}
     names = sorted(t["name"] for t in (r2.get("tools") or []))

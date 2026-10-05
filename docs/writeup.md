@@ -227,7 +227,7 @@ shim 再 import 同名模块，拿到的是自己的半成品 → 循环导入�
 - 决策日志：[DECISIONS.md](https://gitee.com/playing-with-ai-x/privacy-gate/blob/master/DECISIONS.md) —— 20 条决策，每条附当时的实测原因
 
 验证情况：全量体检全绿（规则契约、收窄路径、零依赖断言、泄露面审计、文档命令核对）、
-137 条断言（分级 60 / 网关 38 / 适配器 39）、可 `pip install` 且 `dependencies` 为空。
+140 条断言（分级 60 / 网关 38 / 适配器 42）、可 `pip install` 且 `dependencies` 为空。
 
 > 这套东西是单人 homelab 环境验证的，不是生产级方案。关键词法是启发式而非保证，`bash` 里的 `curl` 能绕过网关——README 里写了一份"诚实清单"，每条都标了**验到哪一步、缺哪一步**。欢迎拍砖。
 

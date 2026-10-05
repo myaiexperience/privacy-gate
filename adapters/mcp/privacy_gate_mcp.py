@@ -42,7 +42,18 @@ sys.path.insert(0, _TOOLS)
 
 import rules_model  # noqa: E402
 
-PROTOCOL_FALLBACK = "2025-03-26"
+# 本适配器支持（= 真的读过其规范、并只用其中最基础的 tools 能力）的协议版本。
+#
+# 规范原文（lifecycle）::
+#   "If the server supports the requested protocol version, it MUST respond with the same
+#    version. Otherwise, the server MUST respond with another protocol version it supports."
+#
+# ⚠️ 以前这里**回显客户端请求的任何版本**，注释还写着"回显是最兼容的做法"——那是错的：
+# 它等于宣称自己懂一个没读过的规范版本。规范里客户端"若不支持服务端回的版本 SHOULD
+# 断开"这条保护，正好被回显废掉了。
+SUPPORTED_PROTOCOLS = ("2025-06-18", "2025-03-26", "2024-11-05")
+LATEST_PROTOCOL = SUPPORTED_PROTOCOLS[0]
+PROTOCOL_FALLBACK = LATEST_PROTOCOL  # 旧名字，保留以免外部引用断掉
 SERVER_INFO = {"name": "privacy-gate", "version": "0.1.0"}
 RULES_PATH = os.environ.get(
     "PRIVACY_GATE_RULES",
@@ -192,10 +203,11 @@ def handle(msg):
 
     if method == "initialize":
         params = msg.get("params") or {}
-        version = params.get("protocolVersion") or PROTOCOL_FALLBACK
+        requested = params.get("protocolVersion")
+        # 规范：支持客户端请求的版本就回同一个；不支持就回一个**自己支持的**版本
+        # （应当是最新的那个）。**不能回显**——见 SUPPORTED_PROTOCOLS 上的说明。
+        version = requested if requested in SUPPORTED_PROTOCOLS else LATEST_PROTOCOL
         return reply(msg_id, {
-            # 回显客户端请求的版本：MCP 客户端会拒绝它不认识的版本，
-            # 而在我们只用最基础的 tools 能力时，回显是最兼容的做法
             "protocolVersion": version,
             "capabilities": {"tools": {"listChanged": False}},
             "serverInfo": SERVER_INFO,
