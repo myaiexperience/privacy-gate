@@ -74,15 +74,48 @@ def is_remote(tool_name, patterns):
     return any(fnmatch.fnmatch(low, p.lower()) for p in patterns)
 
 
+# 兜底时要用到"这次到底是哪个事件、什么工具"。main 一读到输入就记下来。
+_EVENT = {}
+
+
 def emit(obj):
     sys.stdout.write(json.dumps(obj, ensure_ascii=False) + "\n")
     sys.stdout.flush()
 
 
 def deny(reason):
+    """拒绝一个工具调用。
+
+    除了打印 JSON，还**退出码 2**。官方文档把两条路都写了：
+
+      * "exit 0 + 打印 JSON" 是结构化控制的正路；
+      * 但 "If your hook is meant to enforce a policy, use `exit 2`" ——
+        退出 2 在能拦的事件上**无论有没有 JSON 都会拦**。
+
+    社区 issue（anthropics/claude-code#43407 等）里有"exit 2 + deny JSON 都没能阻止
+    执行"的记录，所以这里两者都给：JSON 给理由，退出码给强制力。文档明确说混用是允许的，
+    且退出 2 的拦截效果不会被 JSON 取消——**多给一个不会更差**。
+    """
     emit({"hookSpecificOutput": {
         "hookEventName": "PreToolUse",
         "permissionDecision": "deny",
+        "permissionDecisionReason": reason,
+    }})
+    sys.exit(2)
+
+
+def escalate(reason):
+    """门禁自己判断不了时，把决定权**交回给用户**。
+
+    为什么不是 deny：连输入都读不懂时，我们不知道这是不是远程工具；一刀切拒绝会把
+    Read / Edit 这类本地工具也挡住，整个会话不可用——那不是保守，那是坏掉。
+
+    为什么不是"什么都不输出"：官方文档写着"exit 0 且无输出 = **没有决定**，工具调用
+    照常走权限流程"，也就是**放行**。`ask` 让用户当场决定，方向仍然是"不替你放行"。
+    """
+    emit({"hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "ask",
         "permissionDecisionReason": reason,
     }})
 
@@ -105,11 +138,22 @@ def main():
     try:
         raw = sys.stdin.read()
         event = json.loads(raw) if raw.strip() else {}
-    except Exception:
-        # 连输入都读不懂：不输出任何决策，交回给 Claude Code 的默认行为
+    except Exception as e:
+        # 读不懂输入 = 不知道是什么工具、什么事件。
+        # 这里以前是 `return 0`（不输出任何决策）——按官方文档那等于**放行**，
+        # 而适配器 README 写着"内部出错时对远程工具返回 deny"。两者必须改一个：
+        # 这里选改代码，因为"门禁坏了就放行"正是这个项目最不能有的方向。
+        try:
+            sys.stderr.write("[privacy-gate] hook 读不懂输入: %s\n" % e)
+        except Exception:
+            pass
+        escalate("[privacy-gate] hook 读不懂输入，无法判断是否该放行，请你决定")
         return 0
     if not isinstance(event, dict):
+        escalate("[privacy-gate] hook 收到非对象输入，无法判断是否该放行，请你决定")
         return 0
+    _EVENT.clear()
+    _EVENT.update(event)
 
     name = event.get("hook_event_name")
     session_id = str(event.get("session_id") or "unknown")
@@ -195,9 +239,30 @@ if __name__ == "__main__":
     try:
         sys.exit(main())
     except Exception as e:
-        # 兜底：走到这里说明连分级流程都没跑起来。对远程工具 fail-closed。
+        # 走到这里说明连分级流程都没跑起来。**必须显式说出一个决策**：
+        # 官方文档写着"exit 0 且不输出任何 JSON = 没有决定 → 工具调用照常走权限流程"，
+        # 所以"静默退出"不是 fail-closed，**是 fail-open**。
+        # （第一版这里就是静默 sys.exit(0)，而注释写着 fail-closed——注释骗了自己。）
         try:
             sys.stderr.write("[privacy-gate] hook 内部错误: %s\n" % e)
+        except Exception:
+            pass
+        try:
+            name = _EVENT.get("hook_event_name")
+            if name == "UserPromptSubmit":
+                # 不拦提示词：门禁管的是数据外发，不是拒绝跟你说话
+                emit({"hookSpecificOutput": {
+                    "hookEventName": "UserPromptSubmit",
+                    "additionalContext": "[privacy-gate] hook 内部错误：%s——"
+                                          "本会话无法分级，请检查配置。" % e}})
+            elif is_remote(_EVENT.get("tool_name"), DEFAULT_REMOTE_TOOLS):
+                # 能认出是远程工具 → 这就是 README 承诺的"内部出错时返回 deny"
+                deny("[privacy-gate] hook 内部错误，按 fail-closed 拒绝：%s" % e)
+            else:
+                # 认不出工具（或不是 PreToolUse）→ 交回给用户决定，不替他放行
+                escalate("[privacy-gate] hook 内部错误，无法判断是否该放行，请你决定：%s" % e)
+        except SystemExit:
+            raise
         except Exception:
             pass
         sys.exit(0)

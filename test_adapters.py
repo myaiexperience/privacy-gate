@@ -213,11 +213,34 @@ def test_hook(tmp):
     check("★fail-closed 的理由说清了原因",
           "fail-closed" in str(pd.get("permissionDecisionReason", "")),
           str(pd.get("permissionDecisionReason"))[:80])
+    # ★ 而且 fail-closed 要落在**退出码**上，不能只靠 JSON。
+    # 官方文档："exit 2" 在能拦的事件上无论有没有 JSON 都会拦，并且
+    # "If your hook is meant to enforce a policy, use exit 2"；
+    # 同时社区 issue（#43407 等）里有"exit 2 + deny JSON 都没能阻止执行"的记录。
+    # 两者都给才是这道门禁该有的样子。
+    check("★fail-closed 同时给出退出码 2（不只靠 JSON）",
+          code == 2, "exit=%s" % code)
 
-    # 输入读不懂时不该崩，也不该乱输出决策
-    code, out, err = run([sys.executable, HOOK], "这不是 json", env=env)
-    check("hook 收到非法输入不崩、不输出决策",
-          code == 0 and not out.strip(), "exit=%s out=%r" % (code, out[:60]))
+    # 输入读不懂时：**必须给出一个决策**，不能沉默。
+    # 官方文档写着"exit 0 且无输出 = 没有决定 → 工具调用照常走权限流程"，
+    # 也就是说**沉默等于放行**。
+    # ⚠️ 这条断言以前写的是"不输出决策"——**它在守护 fail-open**。
+    #    测试断言错方向，比没有测试更糟：它会让错误的行为看起来很稳。
+    code_bad, out_bad, err_bad = run([sys.executable, HOOK], "这不是 json", env=env)
+    try:
+        dec_bad = json.loads(out_bad.strip()) if out_bad.strip() else None
+    except Exception:
+        dec_bad = None
+    pd_bad = ((dec_bad or {}).get("hookSpecificOutput") or {})
+    check("输入读不懂时必须给出决策，不能沉默（沉默 = 放行）",
+          pd_bad.get("permissionDecision") in ("ask", "deny"),
+          "exit=%s out=%r" % (code_bad, out_bad[:80]))
+    check("输入读不懂时交给用户决定（不是一刀切拒绝，那会连本地工具一起挡掉）",
+          pd_bad.get("permissionDecision") == "ask",
+          str(pd_bad.get("permissionDecision")))
+    check("输入读不懂时把原因写到了 stderr（人要看得到）",
+          "读不懂输入" in (err_bad or "") or "读不懂输入" in (out_bad or ""),
+          (err_bad or "")[:80])
 
 
 # ── opencode 插件 ↔ 引擎 字段契约 ─────────────────────────

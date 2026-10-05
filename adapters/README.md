@@ -10,11 +10,16 @@
 
 | 适配器 | 强制强度 | 依赖对方配合 | 在本机验证过吗 | 说明 |
 |---|---|---|---|---|
-| **[网关](../tools/gateway.py)** | **强** | **否** | ✅ 25 条断言 | 在 LLM API 的必经路径上。远程工具剥夺 + 重路由 + fail-closed 都在这里。**这是唯一一个框架绕不过的强制点。** |
+| **[网关](../tools/gateway.py)** | **强** | **否** | ✅ 38 条断言 + 真上游实测 | 在 LLM API 的必经路径上。远程工具剥夺 + 重路由 + fail-closed 都在这里。**这是唯一一个框架绕不过的强制点。** |
 | [opencode 插件](../.opencode/plugins/privacy-gate.js) | 中 | 是（v1 插件 hook） | ✅ 语法/导出契约 + 真机使用 | 打标注 + 工具执行前硬拦截。网关缺失时它是主防线。 |
-| [Claude Code hook](claude-code/) | 中 | 是（PreToolUse / UserPromptSubmit） | ⚠️ 协议逻辑✅，**真机未测** | 覆盖不经过网关的路径。上游有一串"hook 没拦住"的 issue，所以定位为增强层。 |
+| [Claude Code hook](claude-code/) | 中 | 是（PreToolUse / UserPromptSubmit） | ⚠️ 协议逻辑✅（含 fail-closed 与退出码），**真机未测** | 覆盖不经过网关的路径。上游有一串"hook 没拦住"的 issue，所以定位为增强层。 |
 | [MCP server](mcp/) | **弱**（自愿调用） | 是（模型得愿意调） | ✅ 协议层断言 | **只做可观测性，不要当门禁。** 刻意只读。 |
 | 裸 CLI | — | — | ✅ | `python privacy_gate.py classify --stdin`，给脚本和管道用。 |
+
+> "本机验证过吗"这一列区分**协议逻辑**与**真机接线**：前者能在没有对方的机器上跑，
+> 后者不能。网关那一行之所以敢写"真上游实测"，是因为本地 llama.cpp 与魔搭推理 API
+> 都真的接过（见 DECISIONS D24）。Claude Code 与 MCP 客户端这台机器上没有，
+> 所以只能到协议层——**"没测过"要写出来，不能含糊**。
 
 ## 一句话选型
 
