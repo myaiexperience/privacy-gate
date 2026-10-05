@@ -330,7 +330,7 @@ class Handler(BaseHTTPRequestHandler):
     # ── 无 body 的 GET 透传（如 /v1/models）──
     def _proxy_get(self, path):
         g = self.gateway
-        url = g.cfg.local_upstream + path
+        url = upstream_url(g.cfg.local_upstream, path)
         try:
             req = urllib.request.Request(url, method="GET")
             up = urllib.request.urlopen(req, timeout=30)
@@ -398,7 +398,7 @@ class Handler(BaseHTTPRequestHandler):
               inherited=inherited, shift=shift, route=route, stripped=stripped)
 
         api_key = None if is_local else (g.cfg.cloud_key or None)
-        url = target + path
+        url = upstream_url(target, path)
         payload = json.dumps(body, ensure_ascii=False).encode("utf-8")
         req = urllib.request.Request(url, data=payload, method="POST")
         req.add_header("Content-Type", "application/json")
@@ -489,6 +489,27 @@ class Handler(BaseHTTPRequestHandler):
                 self.wfile.flush()
             except Exception:
                 pass
+
+
+def upstream_url(base, path):
+    """把客户端路径接到上游 base 上，**不重复版本前缀**。
+
+    客户端请求的是 `<网关>/v1/chat/completions`（网关对外就是 OpenAI 的形状），
+    而上游 base 按约定自带它自己的前缀。所以要做的是**替换**那层 `/v1`，不是拼接：
+
+        base=http://h/v1          path=/v1/chat/completions  ->  http://h/v1/chat/completions
+        base=http://h/openai/v1   path=/v1/chat/completions  ->  http://h/openai/v1/chat/completions
+        base=http://h             path=/v1/chat/completions  ->  http://h/chat/completions
+
+    ⚠️ 这里曾经是错的——直接 `base + path`。上游写 `.../v1` 时会拼成 `.../v1/v1/...`，
+    真上游返回 404，而**当时的假上游接收任何路径**，于是 26 条断言全绿。
+    这是"机制对了不等于能用"的真实版本：只有接到真上游才暴露。
+    接真 Ollama / llama.cpp 复验之后，假的那些上游也改成了**路径严格**，免得再躲过去。
+    """
+    rest = path[3:] if path.startswith("/v1") else path
+    if not rest.startswith("/"):
+        rest = "/" + rest
+    return base + rest
 
 
 def serve(cfg):

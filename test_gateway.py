@@ -48,13 +48,38 @@ def check(note, ok, extra=""):
 # ── 假上游 ─────────────────────────────────────────────────
 
 def make_upstream(label, records, sse=False):
+    """假上游。
+
+    ⚠️ **路径必须严格**：真实上游只认自己的路径。
+
+    这里以前对任何路径都回 200，于是"网关把上游 base 的 `/v1` 又拼了一遍
+    （`.../v1/v1/...`）"这个错，被 26 条断言一路放过——直到接上真的
+    llama.cpp，真上游回 404 才暴露。
+
+    教训：**一个过于宽容的测试替身，比没有替身更危险**——它让被测代码的错
+    看起来是对的。替身该像真东西一样挑剔。
+    """
     class Upstream(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
+        OK_GET = "/v1/models"
+        OK_POST = "/v1/chat/completions"
 
         def log_message(self, *a):
             pass
 
+        def _not_found(self):
+            payload = json.dumps({"error": {"message": "File Not Found",
+                                            "type": "not_found_error",
+                                            "code": 404}}).encode("utf-8")
+            self.send_response(404)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+
         def do_GET(self):
+            if self.path.split("?", 1)[0] != self.OK_GET:
+                return self._not_found()
             payload = json.dumps({"object": "list", "data": [],
                                   "served_by": label}).encode("utf-8")
             self.send_response(200)
@@ -76,6 +101,9 @@ def make_upstream(label, records, sse=False):
                 "body": body,
                 "auth": self.headers.get("Authorization"),
             })
+            # 路径严格：真上游只认自己的路径（见 make_upstream 的 docstring）
+            if self.path.split("?", 1)[0] != self.OK_POST:
+                return self._not_found()
             if sse:
                 self.send_response(200)
                 self.send_header("Content-Type", "text/event-stream")
@@ -185,6 +213,22 @@ def main():
                 "remote_tool_patterns": ["*web*", "*fetch*", "*browse*", "*search*"],
             }, f, ensure_ascii=False, indent=2)
             f.write("\n")
+
+        # ── 0. 上游 URL 拼接（纯函数，不需要起服务器）──
+        # 这条是接上真上游之后补的：以前网关把上游 base 的 /v1 又拼了一遍
+        # （.../v1/v1/...）→ 真上游 404。而当时的假上游接收任何路径，
+        # 所以 26 条断言全是绿的。先单测这个函数，再从真实请求路径上验一遍。
+        _cases = [
+            ("http://h/v1", "/v1/chat/completions", "http://h/v1/chat/completions"),
+            ("http://h/openai/v1", "/v1/chat/completions",
+             "http://h/openai/v1/chat/completions"),
+            ("http://h", "/v1/chat/completions", "http://h/chat/completions"),
+            ("http://h/v1", "/v1/models", "http://h/v1/models"),
+        ]
+        _bad = [(b, p, gateway.upstream_url(b, p), w) for b, p, w in _cases
+                if gateway.upstream_url(b, p) != w]
+        check("上游 URL 拼接不重复版本前缀（三种 base 形式）", not _bad,
+              str(_bad[:1]) if _bad else "三种都对")
 
         cloud_records, local_records = [], []
         cloud_srv, cloud_port = start(make_upstream("cloud", cloud_records))
@@ -353,6 +397,13 @@ def main():
                   (sout.strip().splitlines() or [""])[-1][:80])
         except Exception as e:
             check("网关冒烟脚本自检通过（它要被拿去连真模型）", False, str(e))
+
+        # ── 上游实际收到的路径（端到端验一遍那个拼接）──
+        # 单测过了还不够：这里看的是**真实请求打过去之后，上游看到的是什么路径**。
+        _paths = sorted({r["path"].split("?")[0] for r in cloud_records + local_records})
+        check("上游收到的路径就是 /v1/chat/completions（没被拼成 /v1/v1/...）",
+              _paths == ["/v1/chat/completions"],
+              "实际上游收到：%s" % _paths)
 
         # ── 12. 启动横幅在重定向下必须实时可见 ──
         # 服务类程序的输出要能被重定向后实时看到。Python 的 stdout 在管道/文件下是

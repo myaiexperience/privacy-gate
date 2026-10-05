@@ -168,7 +168,8 @@ appears in the report.
 python check.py           # the full doctor (coverage listed below, no fixed count:
                           # it varies with layout — see the note in check_docs.py)
 python test_routes.py     # 60 assertions — classification, inheritance, exemptions
-python test_gateway.py    # 26 assertions — re-route, tool stripping, fail-closed, SSE
+python test_gateway.py    # 29 assertions — re-route, tool stripping, fail-closed, SSE,
+                          # upstream URL joining, and the startup banner under redirection
 python test_adapters.py   # 36 assertions — MCP protocol, hook decisions, CLI,
                           # plus the JS↔Python field contract (see DECISIONS D19)
 python check_zero_deps.py # every import is stdlib — keeps the "zero deps" claim honest
@@ -211,13 +212,21 @@ before trusting it with anything:
 - **Python 3.9+ is the stated floor and the machine this was written on only has 3.12.**
   The CI matrix covers 3.9 / 3.12 / 3.13; treat the lower bound as *asserted by CI*, not
   verified by hand here.
-- **The gateway is verified against fake upstreams, never against a real Ollama.** The 26
-  assertions in `test_gateway.py` wrap the gateway with a fake cloud and a fake local
-  upstream, which proves the *mechanism* — re-route, tool stripping, inheritance,
-  fail-closed direction. It does not prove it *works*: a real Ollama may 400 on an
-  unknown model name, reject a field, or refuse on context length. The author's inference
-  box was offline while this was written, so that step **was not done here**. One command
-  closes the gap:
+- **The gateway has run against a real local upstream (llama.cpp / Ling-3.0-tiny), but never
+  against Ollama.** The assertions in `test_gateway.py` wrap the gateway with a fake cloud and
+  a fake local upstream, which proves the *mechanism* — re-route, tool stripping, inheritance,
+  fail-closed direction. It does not prove it *works*. So I later pointed it at a **real** local
+  OpenAI-compatible server (the llama.cpp backend bundled with LM Studio on this machine):
+
+  > **First run: all 5 cases FAILED.** Routing was perfect (`route=local`, tools stripped,
+  > inheritance firing) — and the upstream returned 404. The gateway was concatenating the
+  > upstream base with the client path, doubling the prefix (`.../v1/v1/...`). All 26
+  > assertions were green because **the fake upstream accepted any path**. An over-permissive
+  > test double had been masking a real defect as "correct". See DECISIONS D23.
+
+  Fixed (replace the client's `/v1` instead of appending, and make the fakes path-strict) —
+  all 5 cases then pass. **Ollama itself remains unverified**: its OpenAI-compatible layer is
+  a different implementation from llama.cpp's. One command closes that gap:
 
   ```bash
   python tools/gateway_smoke.py --local-upstream http://<your-ollama>:11434/v1 \
