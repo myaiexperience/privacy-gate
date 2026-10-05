@@ -113,6 +113,25 @@ def test_mcp():
           names == ["classify_text", "explain_text", "list_rules"], str(names))
     check("每个工具都带 inputSchema",
           all("inputSchema" in t for t in (r2.get("tools") or [])))
+
+    # ★ "只读"要机器可读，而不只是 README 里的一句话。
+    #   规范里工具注解的正式位置是 tools[].annotations（2025-06-18 schema 的
+    #   ToolAnnotations：title / readOnlyHint / destructiveHint / idempotentHint /
+    #   openWorldHint，camelCase）。我们的三个工具确实只读、也不碰外部实体。
+    _tools = r2.get("tools") or []
+    check("★每个工具都声明 readOnlyHint=true（只读变成机器可读）",
+          bool(_tools) and all((t.get("annotations") or {}).get("readOnlyHint") is True
+                               for t in _tools),
+          str([(t.get("name"), (t.get("annotations") or {}).get("readOnlyHint")) for t in _tools]))
+    check("★每个工具都声明 openWorldHint=false（不与外部实体打交道）",
+          bool(_tools) and all((t.get("annotations") or {}).get("openWorldHint") is False
+                               for t in _tools),
+          str([(t.get("name"), (t.get("annotations") or {}).get("openWorldHint")) for t in _tools]))
+    check("注解里不乱放规范没有的字段",
+          all(set((t.get("annotations") or {}).keys())
+              <= {"title", "readOnlyHint", "destructiveHint",
+                  "idempotentHint", "openWorldHint"} for t in _tools),
+          str([sorted((t.get("annotations") or {}).keys()) for t in _tools]))
     check("★ MCP 是只读的：没有任何改规则的入口",
           all(k in ("classify_text", "explain_text", "list_rules") for k in names))
 

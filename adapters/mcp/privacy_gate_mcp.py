@@ -71,6 +71,18 @@ def rules():
     return _RULES
 
 
+# 工具注解——规范里"描述工具行为"的正式位置。
+#
+# **"本适配器只读"从此机器可读，而不只是 README 里的一句话。**
+# 字段与取值取自 2025-06-18 的**权威 JSON schema**（`definitions.ToolAnnotations`）：
+#   title / readOnlyHint / destructiveHint / idempotentHint / openWorldHint（camelCase）
+#
+# 只声明我们说实话的两条：
+#   readOnlyHint=True   —— 三个工具都不改任何东西（另有断言守着"没有改规则的入口"）
+#   openWorldHint=False —— 它们不跟外部实体打交道（只在本地词表上做匹配）
+# destructiveHint / idempotentHint 规范说"仅在 readOnlyHint == false 时有意义"，故不写。
+READ_ONLY_ANNOTATIONS = {"readOnlyHint": True, "openWorldHint": False}
+
 TOOLS = [
     {
         "name": "classify_text",
@@ -78,6 +90,7 @@ TOOLS = [
                         "并说明命中了哪些词、哪些语境豁免生效。"
                         "注意：本工具是自愿调用的观测手段，不能当作强制门禁——"
                         "强制拦截在本地网关里做。"),
+        "annotations": READ_ONLY_ANNOTATIONS,
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -93,12 +106,14 @@ TOOLS = [
     {
         "name": "list_rules",
         "description": "列出当前规则库的规则 id、级别、动作与模式数量（不返回全部词，避免污染上下文）。",
+        "annotations": READ_ONLY_ANNOTATIONS,
         "inputSchema": {"type": "object", "properties": {}},
     },
     {
         "name": "explain_text",
         "description": "逐条解释为什么这段文本被判成这个级别：命中了哪条规则、哪个模式、"
                        "哪条豁免生效、哪条豁免空转。",
+        "annotations": READ_ONLY_ANNOTATIONS,
         "inputSchema": {
             "type": "object",
             "properties": {"text": {"type": "string"}},

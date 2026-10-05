@@ -66,6 +66,11 @@ echo '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"classify_t
   > 回显等于宣称自己懂一个没读过的规范版本；而规范里"客户端若不支持服务端回的版本
   > SHOULD 断开"这条保护，正好被它废掉。现在有断言守着（含"不支持的版本不能被回显"）。
 
+- **工具注解：三个工具都声明 `readOnlyHint: true` + `openWorldHint: false`。**
+  也就是说"本适配器只读"这句声明**机器可读**，而不只是这份 README 里的一句话。
+  字段与取值对着 2025-06-18 的**权威 JSON schema**（`definitions.ToolAnnotations`）核过，
+  不是凭印象写的；`destructiveHint` / `idempotentHint` 按规范"仅在 readOnlyHint == false
+  时有意义"而没有写。
 - 工具内部异常回 `isError: true` 而不是让连接崩掉；协议层异常回 JSON-RPC 标准错误码
   （`-32700` 解析失败 / `-32600` 非法请求 / `-32601` 未实现 / `-32602` 参数错 / `-32603` 内部错误）
 - stdout 只走协议，日志走 stderr

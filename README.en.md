@@ -171,9 +171,9 @@ python test_routes.py     # 60 assertions — classification, inheritance, exemp
 python test_gateway.py    # 38 assertions — re-route, tool stripping, fail-closed, SSE,
                           # upstream URL joining (POST + GET), field passthrough,
                           # no client-header leak, which key goes to which leg, banner
-python test_adapters.py   # 42 assertions — MCP protocol (incl. spec-conformant version
-                          # negotiation), hook decisions (fail-closed + exit code 2), CLI,
-                          # plus the JS↔Python field contract (DECISIONS D19)
+python test_adapters.py   # 45 assertions — MCP protocol (spec-conformant version
+                          # negotiation + tool annotations), hook decisions (fail-closed +
+                          # exit code 2), CLI, plus the JS↔Python field contract (D19)
 python check_zero_deps.py # every import is stdlib — keeps the "zero deps" claim honest
 python check_no_leaks.py  # no private IPs, user paths, token shapes, or local deny words
 python check_docs.py      # every script, subcommand and link in the docs actually exists

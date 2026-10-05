@@ -769,6 +769,50 @@ D26 是靠"核官方文档"逮到 Claude Code hook 的 fail-open。同一把尺�
 **教训**：审计到别人家的接口时，"读起来对"和"规范里写着 MUST"是两回事；
 而"想补一个字段"和"能确认这个字段的线上名字"也是两回事。
 
+### D28：把上一轮"没做的那条"做掉了 —— 附一次差点写错的结论（2026-10）
+
+D27 留了一条明确的线头：`tools[].annotations` 是规范里"描述工具行为"的正式位置，
+而"本适配器只读"当时只写在 README 的散文里、机器读不到。我没做，因为**没能从权威源
+确认线上的 JSON 命名**。
+
+这一轮把它做完了，而且过程里有一次**值得单独记下来的差点出错**。
+
+**差点写错的结论**：中途我拿到一份 schema 页的抓取结果（100,298 字节），
+grep `readOnlyHint` / `ToolAnnotations` —— **0 次命中**。差一点就据此写下
+"2025-06-18 规范里根本没有工具注解"。
+
+但那份文件是被**截断**的（页面太长，抓取工具截了中间段）。于是换成
+**下载完整 schema 到本地再用 Python 解析**：108,234 字节，91 个定义，
+`Tool` 与 `ToolAnnotations` **都在**。
+
+> **在截断的文件里找不到，不等于不存在。**
+> "没搜到"只有在**搜索范围完整**时才是证据——而这一点本身需要先证明。
+
+**确认到的事实**（`definitions.ToolAnnotations`）：字段为
+`title` / `readOnlyHint` / `destructiveHint` / `idempotentHint` / `openWorldHint`（camelCase），
+与第三方 SDK 文档一致。顺带把整个 MCP 表面都核了一遍：
+
+| 类型 | schema 要求 | 本适配器 |
+|---|---|---|
+| `InitializeResult` | required = `capabilities` / `protocolVersion` / `serverInfo` | ✅ 三者都有 |
+| `ListToolsResult` | required = `tools` | ✅ |
+| `Tool` | required = `name` / `inputSchema` | ✅ |
+| `CallToolResult` | required = `content`；`isError` 可选 | ✅ |
+| `ServerCapabilities.tools` | `listChanged` | ✅ |
+| `Implementation` | required = `name` / `version` | ✅ |
+
+**做了什么**：三个工具都加上 `annotations: {"readOnlyHint": true, "openWorldHint": false}` ——
+只声明我们**说实话**的两条（三个工具确实只改本地无状态计算；也确实不与外部实体打交道）。
+`destructiveHint` / `idempotentHint` 按规范"仅在 `readOnlyHint == false` 时有意义"而不写。
+加三条断言（含"注解里不放规范没有的字段"）。
+
+**教训两条**：
+1. **"没搜到"要先证明搜全了。** 这跟 D27 那条"读起来对 ≠ 规范写着 MUST"是一对：
+   一个说的是**证据不够**，另一个说的是**证据可能来自不完整的地方**。
+2. **上一轮"确认不了就没做"是对的**——而且它把这一轮的成本压到了很低：
+   因为当时把"要接着做的话，权威源在哪儿"写清楚了（schema.json），
+   这一轮直接去取就行。**留一条写得清楚的"未做"，比硬凑一个"做了"更省事。**
+
 ## 下一步（未做，记录在案）
 
 ### 已经推上去的（2026-09）
