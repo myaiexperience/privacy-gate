@@ -1149,6 +1149,58 @@ def check_docs_commands():
 
 # ── 主流程 ─────────────────────────────────────────────────
 
+def find_studio_mirror():
+    """找"创空间镜像"目录：本仓库的同级、且同时有 sync_engine.py 与 keywords/rules.json。
+
+    魔搭创空间要求引擎与词表位于**它自己的仓库根目录**，所以那边必然有一份拷贝；
+    单一来源仍是本仓库。没有这种目录时（外部使用者就是这样）返回 None。
+    """
+    parent = os.path.dirname(_HERE)
+    try:
+        names = sorted(os.listdir(parent))
+    except OSError:
+        return None
+    for name in names:
+        d = os.path.join(parent, name)
+        if not os.path.isdir(d) or os.path.abspath(d) == os.path.abspath(_HERE):
+            continue
+        if (os.path.isfile(os.path.join(d, "sync_engine.py"))
+                and os.path.isfile(os.path.join(d, "keywords", "rules.json"))):
+            return d
+    return None
+
+
+def check_studio_mirror():
+    """旁边若存在创空间镜像，它的引擎副本必须与本仓库**逐字节一致**。
+
+    ★ 为什么这一项要存在：创空间里那份拷贝**不会被任何东西自动更新**。
+    引擎改了、忘了同步，线上演示页面就会悄悄跑旧代码——而它看起来完全正常
+    （"没报错"和"没问题"长得一样，这是这一系列反复出现的那个形状）。
+
+    以前这一步靠"人记得跑一次 python sync_engine.py --check"。手工检查的问题
+    不是不准，是**下一轮就不会再跑了**（D17）。所以接进体检。
+
+    不是这种布局时**什么都不记录**——不能造一个会混进"通过"里的状态。
+    """
+    mirror = find_studio_mirror()
+    if mirror is None:
+        return
+    script = os.path.join(mirror, "sync_engine.py")
+    try:
+        r = subprocess.run([sys.executable, script, "--check"], cwd=mirror,
+                           capture_output=True, timeout=180)
+    except Exception as e:
+        record("创空间镜像", "FAIL", "sync_engine.py --check 跑不起来: %s" % e)
+        return
+    out = ((r.stdout or b"").decode("utf-8", "replace")
+           + (r.stderr or b"").decode("utf-8", "replace"))
+    if r.returncode == 0:
+        record("创空间镜像", "PASS",
+               "%s：引擎 / 依赖模块 / 词表与这里逐字节一致" % os.path.basename(mirror))
+    else:
+        record("创空间镜像", "FAIL", _problem_lines(out))
+
+
 def main():
     for s in (sys.stdout, sys.stderr):
         try:
@@ -1207,6 +1259,7 @@ def main():
     check_no_leaks()
     check_rules_override()
     check_docs_commands()
+    check_studio_mirror()
 
     print("=" * 60)
     fails = [r for r in results if r[1] == "FAIL"]
