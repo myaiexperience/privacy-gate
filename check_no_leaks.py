@@ -35,6 +35,7 @@
 
 import os
 import re
+import subprocess
 import sys
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -75,6 +76,42 @@ ALLOW = [
     re.compile(r"/home/<|/Users/<"),
     re.compile(r"<[^>]*(?:IP|ip|地址|路径|名字|昵称|令牌|token)[^>]*>"),  # <你的Ollama服务器IP>
 ]
+
+# ── 「内容扫不出问题」≠「可以发布」────────────────────────────
+#
+# 运行时数据（决策日志 / 纠正记录 / 会话状态）里装的是**真实输入**，
+# 而通用模式（内网地址 / 用户路径 / 令牌形态）扫不出"这句话本身是业务机密"。
+# 一个装着真实输入的日志被提交了，上面的内容扫描会全绿——因为它没有 IP、没有令牌。
+#
+# 所以再守一条：**这些文件绝不能被 git 跟踪**——被跟踪就等于会被发布。
+# 当前状态是对的（全被 .gitignore 挡着），但**没有任何东西阻止某天有人
+# `git add -f` 或者删掉一条 ignore 规则**。
+RUNTIME_PATHS = (
+    "data/routing_log.jsonl",
+    "data/corrections.jsonl",
+    "data/gateway_sessions.json",
+    "data/claude_sessions.json",
+    "leaks.local.txt",
+    ".opencode/privacy-gate-state.json",
+)
+
+
+def tracked_runtime_files():
+    """RUNTIME_PATHS 里**被 git 跟踪**的那些（被跟踪 = 会被发布）。
+
+    返回 None 表示"查不了"（没有 git / 不在仓库里 / git 出错）——
+    **"查不了"不等于"没问题"**，所以调用方必须把这两种情况分开说。
+    """
+    if not os.path.isdir(os.path.join(ROOT, ".git")):
+        return None
+    try:
+        r = subprocess.run(["git", "ls-files", "--"] + list(RUNTIME_PATHS),
+                           cwd=ROOT, capture_output=True, timeout=30)
+    except Exception:
+        return None
+    if r.returncode != 0:
+        return None
+    return [p for p in r.stdout.decode("utf-8", "replace").splitlines() if p.strip()]
 
 # 用户主目录路径里这些"用户名"是文档占位，不算泄露
 USERNAME_ALLOW = {"<user>", "<name>", "<你的用户名>", "studio"}
@@ -175,6 +212,18 @@ def main(argv=None):
     print("扫描文件：%d 个" % total)
     print("本地词表：%s" % ("、".join(deny_words) if deny_words
                           else "（无。可用 PRIVACY_GATE_DENY_WORDS 或 leaks.local.txt 补充）"))
+
+    # 再守一条：运行时数据不能被 git 跟踪（被跟踪 = 会被发布）。
+    # 内容扫描对这类文件是**盲的**——真实输入里没有 IP、没有令牌。
+    tracked = tracked_runtime_files()
+    if tracked is None:
+        print("  [略过] 运行数据跟踪检查：没有 git 或不可用（**这不等于没问题**）")
+    elif tracked:
+        for p in tracked:
+            hits.append((p, 0, "运行时数据被 git 跟踪（等于会被发布）", ""))
+    else:
+        print("  [ OK ] 运行时数据都没被 git 跟踪（里面的真实输入不会进发布）")
+
     if hits:
         print("")
         for rel, lineno, label, sample in hits:
