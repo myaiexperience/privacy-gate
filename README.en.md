@@ -176,7 +176,9 @@ python test_adapters.py   # 45 assertions — MCP protocol (spec-conformant vers
                           # negotiation + tool annotations), hook decisions (fail-closed +
                           # exit code 2), CLI, plus the JS↔Python field contract (D19)
 python check_zero_deps.py # every import is stdlib — keeps the "zero deps" claim honest
-python check_no_leaks.py  # no private IPs, user paths, token shapes, or local deny words
+python check_no_leaks.py  # no private IPs, user paths, token shapes, hostnames (incl.
+                          # this machine's, derived from the environment), or local deny
+                          # words — plus: runtime data must not be tracked by git
 python check_docs.py      # every script, subcommand and link in the docs actually exists
 ```
 

@@ -26,6 +26,15 @@
 203.0.113.x）就是给文档用的，必须放行——**不然写示例的人只能去编一个真实内网 IP**，
 那才是真的埋雷。
 
+主机名怎么查
+------------
+两条一起用：
+  1. **本机主机名从环境变量推导**（COMPUTERNAME / HOSTNAME）——手写黑名单会漏，
+     而环境变量是权威值；
+  2. 一个**通用模式**认 Windows 默认机器名，这样连**别人机器**的名字也能抓到。
+只查主机名、不查用户名：用户名常是普通英文词（runner / admin / dave），
+加了词边界也会误报，在 CI 上必然变成噪音——**有噪音的检查会先被忽略、然后被删掉**。
+
 用法：
   python check_no_leaks.py
   python check_no_leaks.py --roots tools adapters
@@ -61,7 +70,28 @@ PATTERNS = [
         r"\b(?:sk|ms|ghp|gho|glpat|xoxb)-[A-Za-z0-9_\-]{12,}")),
     ("疑似私钥块", re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----")),
     ("邮箱地址", re.compile(r"\b[\w.+-]+@[\w-]+\.[\w.]{2,}\b")),
+    # Windows 默认机器名（DESKTOP- 加 7 位）——足够独特，几乎不会误报，
+    # 而且能抓到**别人机器**的名字（不只本机）。
+    ("Windows 默认主机名", re.compile(r"\bDESKTOP-[A-Z0-9]{7}\b", re.IGNORECASE)),
 ]
+
+
+def machine_tokens():
+    """从环境里**推导**本机标识符——不要靠人记得把机器名写进黑名单。
+
+    只取**主机名**，不取用户名：机器名（Windows 默认那串大写字母加数字）足够独特，
+    而用户名常常是普通英文词（runner / admin / dave），即使加词边界也会误报，
+    在 CI 上必然变成噪音——**有噪音的检查会先被忽略、然后被删掉**。
+    用户名那条泄露路径（`C:\\Users\\<名>`）已由"用户主目录路径"模式覆盖。
+
+    只收长度 >= 5 的，进一步压掉误报。环境变量是权威值，手写清单只会漏。
+    """
+    out = []
+    for var in ("COMPUTERNAME", "HOSTNAME"):
+        v = (os.environ.get(var) or "").strip()
+        if len(v) >= 5:
+            out.append((var, v))
+    return out
 
 # 放行：回环、文档地址段、演示域名、占位符写法
 ALLOW = [
@@ -172,6 +202,11 @@ def scan_file(path, deny_words):
             if label == "用户主目录路径" and m.group(1) in USERNAME_ALLOW:
                 continue
             findings.append((lineno, label, m.group(0)))
+        # 本机主机名（环境变量推导；手写黑名单会漏）
+        low = line.lower()
+        for var, tok in machine_tokens():
+            if tok.lower() in low:
+                findings.append((lineno, "本机主机名（$%s）" % var, tok))
         for w in deny_words:
             if w and w in line:
                 findings.append((lineno, "本地词表命中", w))
