@@ -338,6 +338,50 @@ def main():
               st_m == 200 and body_m.get("served_by") == "local",
               "status=%s served_by=%s" % (st_m, body_m.get("served_by")))
 
+        # ── 6.6 透明转发：额外字段原样过去，客户端请求头绝不能混进 body ──
+        #
+        # 真实客户端会带一堆我们没见过的字段（temperature / top_p / stream_options /
+        # parallel_tool_calls / response_format / 厂商扩展……）。网关应该是"只改两个
+        # 字段"的中间人，不是"重建请求"的转换器——后者会让真客户端在意想不到的地方失灵。
+        #
+        # 同时验一条**安全**性质：handler 为了推会话键，会把客户端请求头以 `_headers`
+        # 临时挂进 body，转发前必须摘掉。否则客户的 Authorization 会以 **body 字段**的
+        # 形式被送到上游（走云端腿时更严重）。代码里确实是 try/finally，但此前
+        # **没有任何断言守着它**——而"读代码看着对"和"有断言守着"是两件事。
+        extra_body = {
+            "temperature": 0.7,
+            "top_p": 0.95,
+            "seed": 12345,
+            "stream_options": {"include_usage": True},
+            "parallel_tool_calls": False,
+            "response_format": {"type": "json_object"},
+            "stop": ["\n\n"],
+            "x_vendor_extension": {"weird": ["nested", 1, None]},
+        }
+        _cloud_before = len(cloud_records)
+        st_pt, body_pt, _ = post(
+            base, msg("今天天气不错", **extra_body),
+            headers={"x-session-id": "passthrough-1",
+                     "Authorization": "Bearer CLIENT-SECRET-DO-NOT-FORWARD"})
+        check("带额外字段的请求仍然 200", st_pt == 200, "status=%s" % st_pt)
+        _sent = cloud_records[_cloud_before:]
+        _got = _sent[-1]["body"] if _sent else {}
+        _missing = {k: v for k, v in extra_body.items() if _got.get(k) != v}
+        check("额外字段被原样透传（网关不是「重建请求」的转换器）", not _missing,
+              ("对不上的字段：%s" % list(_missing)) if _missing else "8 个字段都在")
+        _dump = json.dumps(_got, ensure_ascii=False)
+        _leak_hdr = "_headers" in _got
+        _leak_auth = "CLIENT-SECRET-DO-NOT-FORWARD" in _dump
+        # 补充说明必须跟着结果走：写死的说明文字会让 PASS 读起来像 FAIL
+        # （这个错我在 test_adapters.py 里修过一次，这里又犯了一次——
+        #  说明"说明文字的准确性"不是一次性的问题，而是每次都要注意的。）
+        check("客户端请求头没有混进转发出去的 body（_headers 已摘掉）",
+              not _leak_hdr,
+              "★ body 里出现了 _headers" if _leak_hdr else "body 里没有 _headers")
+        check("客户端 Authorization 的值没有出现在 body 里",
+              not _leak_auth,
+              "★ Authorization 的值被写进了 body" if _leak_auth else "body 里没有该值")
+
         # ── 7. ★ fail-closed 方向性：本地上游不可达 → 502，且不回落云端 ──
         dead = gateway.Gateway(gateway.Config(gateway.build_parser().parse_args([
             "--rules", rules_path,
