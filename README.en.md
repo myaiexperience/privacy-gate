@@ -66,6 +66,7 @@ python tools/gateway.py \
     --policy reroute
 
 # 2) Point your agent's base_url at http://127.0.0.1:8787/v1
+#    (per-client settings, incl. the Claude Code exception: docs/clients.md)
 # 3) Check it is alive
 curl http://127.0.0.1:8787/healthz
 ```

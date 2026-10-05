@@ -252,7 +252,7 @@ x-privacy-gate: level=high policy=reroute inherited=true tools-stripped=web_sear
 ├── .github/workflows/ci.yml           # CI：2 个 OS × 3 个 Python 版本
 ├── data/                              # routing_log.jsonl / corrections.jsonl（运行时生成）
 ├── opencode.jsonc.example             # 配置模板（worker + cloud + provider 示例）
-├── docs/                              # 设计文档（v1 方案 / v3 执行计划存档；v6 网关提案；v5→v6 迁移说明）
+├── docs/                              # 设计文档（v1 方案 / v3 执行计划存档；v6 网关提案；v5→v6 迁移说明；[客户端接入](docs/clients.md)）
 └── DECISIONS.md                       # 历次迭代决策日志（为什么砍、为什么留）
 ```
 
