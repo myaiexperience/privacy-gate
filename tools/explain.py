@@ -41,7 +41,8 @@ sys.path.insert(0, _HERE)
 import rules_model  # noqa: E402
 import rules_engine  # noqa: E402
 
-DEFAULT_RULES = os.path.join(_HERE, "..", "keywords", "rules.json")
+DEFAULT_RULES = (os.environ.get("PRIVACY_GATE_RULES")
+                 or os.path.join(_HERE, "..", "keywords", "rules.json"))
 
 
 def explain(text, rules, prev_level=None):

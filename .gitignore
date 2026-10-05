@@ -10,6 +10,14 @@ venv/
 data/*.jsonl
 data/*.log
 
+# 网关会话状态
+data/gateway_sessions.json
+data/claude_sessions.json
+
+# 本地敏感词表（泄露面审计的项目专属部分）——**绝不能提交**，
+# 它存在的意义就是让审计器不必把敏感词写进公开代码里
+leaks.local.txt
+
 # 插件会话状态（跨重启恢复多轮继承）
 .opencode/privacy-gate-state.json
 

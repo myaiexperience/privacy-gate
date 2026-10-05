@@ -37,6 +37,10 @@ jobs:
       - name: Zero third-party dependency assertion
         run: python check_zero_deps.py
 
+      # 发布前"不暴露内网 IP / 主机名 / 业务关键词"这条，不能靠人记得跑
+      - name: Leak audit (private IPs, user paths, token shapes)
+        run: python check_no_leaks.py
+
       - name: Classification regression
         run: python test_routes.py
 

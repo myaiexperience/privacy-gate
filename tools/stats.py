@@ -32,7 +32,8 @@ from collections import Counter
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, _HERE)
-DEFAULT_LOG = os.path.join(_HERE, "..", "data", "routing_log.jsonl")
+DEFAULT_LOG = (os.environ.get("PRIVACY_GATE_LOG")
+               or os.path.join(_HERE, "..", "data", "routing_log.jsonl"))
 LEVELS = ("none", "medium", "high")
 
 

@@ -29,6 +29,10 @@ opencode 隐私门禁一键体检（check.py）
                      裸 CLI 分发；含"规则不可用时 fail-closed"这条安全回归
   8. 零第三方依赖     AST 扫全仓库 import，动态判断是否标准库——
                      守住 README 上"零依赖"那句话
+  9. 泄露面审计       扫描私网地址 / 用户主目录路径 / 令牌形态 / 本地敏感词表——
+                     发布前"不暴露内网 IP、主机名、业务关键词"这条不能靠人记得跑
+  10. 规则路径覆盖     PRIVACY_GATE_RULES 必须真的替换（而非叠加）出厂词表，
+                     且纠正回流写进自定义文件——这是"边界由使用者定"的落地
 
 用法:
   python 01-OpenCode配置/check.py      # 活体项目布局
@@ -163,14 +167,17 @@ def _child_env():
     return env
 
 
-def run_py(args, cwd, stdin_bytes=None, timeout=180):
+def run_py(args, cwd, stdin_bytes=None, timeout=180, extra_env=None):
+    env = _child_env()
+    if extra_env:
+        env.update({k: str(v) for k, v in extra_env.items()})
     return subprocess.run(
         [sys.executable] + args,
         cwd=cwd,
         input=stdin_bytes,
         capture_output=True,
         timeout=timeout,
-        env=_child_env(),
+        env=env,
     )
 
 
@@ -966,6 +973,127 @@ def check_zero_deps():
                last or ("退出码 %s" % r.returncode))
 
 
+# ── 9. 泄露面审计 ──────────────────────────────────────────
+
+def check_no_leaks():
+    """发布前不该出现的东西，不该靠人记得检查。
+
+    "不暴露内网 IP / 主机名 / 业务关键词"目前只能靠人手工跑一遍——而手工检查的
+    问题不是不准，是**下一轮就不会再跑了**。这条把它变成常驻断言（D17 的同款原则）。
+
+    注意审计器本身**不含**任何项目专属敏感词（否则它就成了泄露源）；
+    项目词走环境变量或 gitignore 掉的 leaks.local.txt。
+    """
+    path = _first_existing(os.path.join(CANON_DIR, "check_no_leaks.py"),
+                           os.path.join(PROJECT_ROOT, "check_no_leaks.py"))
+    if not os.path.isfile(path):
+        record("泄露面审计", "FAIL", f"check_no_leaks.py 不存在: {path}")
+        return
+    try:
+        r = run_py([path], CANON_DIR, timeout=180)
+    except Exception as e:
+        record("泄露面审计", "FAIL", f"调用异常: {e}")
+        return
+    lines = r.stdout.decode("utf-8", "replace").strip().splitlines()
+    last = lines[-1] if lines else ""
+    scanned = next((l for l in lines if l.startswith("扫描文件")), "")
+    if r.returncode == 0:
+        record("泄露面审计", "PASS", "；".join(x for x in (scanned, last) if x))
+    else:
+        detail = [l.strip() for l in lines if l.strip().startswith("[")]
+        record("泄露面审计", "FAIL",
+               "%s 处命中：%s" % (len(detail), " | ".join(detail[:3])) or last)
+
+
+# ── 10. 规则路径可覆盖（"边界由使用者定"的落地）────────────
+
+def check_rules_override():
+    """`PRIVACY_GATE_RULES` 真的能把规则文件指到别处。
+
+    听上去像个小功能，但它坏了，"开放性"就只剩一句口号：
+    使用者自己加的词没地方放，只能塞进公开词表，然后每次 git pull 打架——
+    而打架的结局通常是使用者干脆不改了。
+
+    要验三件事：自定义词表生效、**出厂词表被真正替换（不是合并）**、
+    纠正回流把改动写进自定义文件（含它旁边的回归用例）。
+    """
+    if not os.path.isfile(SHIM_ENGINE) or not os.path.isfile(SHIM_CORRECT):
+        record("规则路径覆盖", "FAIL", "引擎或纠正脚本不存在")
+        return
+    tmp = tempfile.mkdtemp(prefix="privacy-gate-override-")
+    problems = []
+    detail = []
+    try:
+        rules_path = os.path.join(tmp, "my-rules.json")
+        with open(rules_path, "w", encoding="utf-8", newline="\n") as f:
+            json.dump({
+                "schema": "v4",
+                "rules": [{"id": "mine", "level": "high", "action": "block_remote",
+                           "match": {"type": "substring", "patterns": ["我自己的暗号"]}}],
+                "exceptions": [],
+                "topic_shift_keywords": ["换个话题"],
+                "remote_tool_patterns": ["*web*"],
+            }, f, ensure_ascii=False, indent=2)
+            f.write("\n")
+        env = {"PRIVACY_GATE_RULES": rules_path,
+               "PRIVACY_GATE_LOG": os.path.join(tmp, "log.jsonl")}
+
+        def level_of(text):
+            r = run_py([SHIM_ENGINE, "--json", "--stdin"], PROJECT_ROOT,
+                       stdin_bytes=text.encode("utf-8"), timeout=60, extra_env=env)
+            try:
+                return json.loads(r.stdout.decode("utf-8", "replace").strip()).get("effective_level")
+            except Exception:
+                return None
+
+        got = level_of("这是 我自己的暗号")
+        if got != "high":
+            problems.append("自定义词表没生效：期望 high，实得 %s" % got)
+        else:
+            detail.append("自定义词表生效")
+
+        # 关键：出厂词表必须被**替换**而不是合并——否则"我的边界"和"作者的边界"会叠加
+        got2 = level_of("帮我写一份保密协议")
+        if got2 != "none":
+            problems.append("出厂词表没被替换（'保密'仍命中，级别 %s）——" % got2
+                            + "说明 PRIVACY_GATE_RULES 只是叠加而非覆盖")
+        else:
+            detail.append("出厂词表被替换而非叠加")
+
+        # 纠正回流要写进自定义文件，且回归用例落在它旁边
+        r = run_py([SHIM_CORRECT], tmp,
+                   stdin_bytes=json.dumps({
+                       "action": "add", "keyword": "我加的第二个词", "level": "high",
+                       "user_input": "我加的第二个词 出现了",
+                   }, ensure_ascii=False).encode("utf-8"),
+                   timeout=60, extra_env=env)
+        try:
+            out = json.loads(r.stdout.decode("utf-8", "replace").strip())
+        except Exception:
+            out = None
+        if r.returncode != 0 or not (out or {}).get("ok"):
+            problems.append("correct.py 在自定义词表下失败：exit=%s out=%s" % (r.returncode, out))
+        else:
+            body = open(rules_path, "rb").read()
+            if "我加的第二个词".encode("utf-8") not in body:
+                problems.append("纠正没有写进自定义词表")
+            if not os.path.isfile(os.path.join(tmp, "test_cases.json")):
+                problems.append("回归用例没有落在自定义词表旁边")
+            if b"\r\n" in body:
+                problems.append("自定义词表的写盘引入了 CRLF")
+            if not problems:
+                detail.append("纠正回流写进自定义文件")
+
+        if problems:
+            record("规则路径覆盖", "FAIL", "; ".join(problems))
+        else:
+            record("规则路径覆盖", "PASS", "；".join(detail))
+    except Exception as e:
+        record("规则路径覆盖", "FAIL", "调用异常: %s" % e)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 # ── 主流程 ─────────────────────────────────────────────────
 
 def main():
@@ -997,6 +1125,8 @@ def main():
     check_gateway()
     check_adapters()
     check_zero_deps()
+    check_no_leaks()
+    check_rules_override()
 
     print("=" * 60)
     fails = [r for r in results if r[1] == "FAIL"]

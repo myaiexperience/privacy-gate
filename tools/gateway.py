@@ -61,9 +61,12 @@ import rules_engine  # noqa: E402
 import rules_model  # noqa: E402
 import session as session_mod  # noqa: E402
 
-DEFAULT_RULES = os.path.join(_HERE, "..", "keywords", "rules.json")
-DEFAULT_LOG = os.path.join(_HERE, "..", "data", "routing_log.jsonl")
-DEFAULT_STATE = os.path.join(_HERE, "..", "data", "gateway_sessions.json")
+_DATA = os.environ.get("PRIVACY_GATE_DATA") or os.path.join(_HERE, "..", "data")
+DEFAULT_RULES = (os.environ.get("PRIVACY_GATE_RULES")
+                 or os.path.join(_HERE, "..", "keywords", "rules.json"))
+DEFAULT_LOG = os.environ.get("PRIVACY_GATE_LOG") or os.path.join(_DATA, "routing_log.jsonl")
+DEFAULT_STATE = (os.environ.get("PRIVACY_GATE_STATE")
+                 or os.path.join(_DATA, "gateway_sessions.json"))
 
 POLICIES = ("reroute", "block", "annotate")
 
