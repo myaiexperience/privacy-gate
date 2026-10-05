@@ -17,7 +17,8 @@ import subprocess
 import sys
 import tempfile
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "tools"))
+_ROOT = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(_ROOT, "tools"))
 import rules_engine  # noqa: E402
 import rules_model  # noqa: E402
 
@@ -176,6 +177,49 @@ def check_v4_model():
     PASS += 1 if ok else 0
     FAIL += 0 if ok else 1
     print("[%s] v3 自动转 v4 后分级与动作保持" % ("PASS" if ok else "FAIL"))
+
+    # ★ v3 文件被 correct.py **写回**过一次之后，一个词都不能丢。
+    #
+    # 上面那条只覆盖了"读时转换"（一个词的合成文件）。而真实场景是：
+    # 老用户的词表是 v3（活体那份就是），他做的第一次纠正会走
+    # "读时转 v4 → 改 → 写回 v4"这条路——**文件格式当场就变了**。
+    # 这条要守的是那次写回不丢词、且行尾/末尾换行都规整。
+    tk = tempfile.mkdtemp(prefix="privacy-gate-v3write-")
+    try:
+        v3_path = os.path.join(tk, "rules.json")
+        v3 = {
+            "_schema": "v3",
+            "privacy_high": {"action": "block_remote",
+                             "keywords": ["保密", "合同", "股权"]},
+            "privacy_medium": {"action": "prefer_local",
+                               "keywords": ["预算", "排期"]},
+        }
+        with open(v3_path, "w", encoding="utf-8", newline="\n") as f:
+            f.write(json.dumps(v3, ensure_ascii=False))
+        env = dict(os.environ)
+        env["PRIVACY_GATE_RULES"] = v3_path
+        env["PRIVACY_GATE_DATA"] = tk
+        env["PYTHONUTF8"] = "1"
+        subprocess.run(
+            [sys.executable, os.path.join(_ROOT, "tools", "correct.py")],
+            input=json.dumps({"action": "add", "keyword": "新增词", "level": "high",
+                              "user_input": "新增词 出现了一次"}).encode("utf-8"),
+            capture_output=True, env=env, timeout=60)
+        raw = open(v3_path, "rb").read()
+        after = json.loads(raw.decode("utf-8"))
+        words = []
+        for r in after.get("rules") or []:
+            words += (r.get("match") or {}).get("patterns") or []
+        wanted = ("保密", "合同", "股权", "预算", "排期", "新增词")
+        ok = (after.get("schema") == "v4"
+              and all(w in words for w in wanted)
+              and b"\r\n" not in raw and raw.endswith(b"\n"))
+        PASS += 1 if ok else 0
+        FAIL += 0 if ok else 1
+        print("[%s] ★v3 词表被 correct.py 写回后不丢词（%d 个词，schema=%s）"
+              % ("PASS" if ok else "FAIL", len(words), after.get("schema")))
+    finally:
+        shutil.rmtree(tk, ignore_errors=True)
 
     # lint 必须抓出的问题（否则"契约可见"就是空话）
     lint_cases = [

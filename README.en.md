@@ -167,7 +167,8 @@ appears in the report.
 ```
 python check.py           # the full doctor (coverage listed below, no fixed count:
                           # it varies with layout — see the note in check_docs.py)
-python test_routes.py     # 60 assertions — classification, inheritance, exemptions
+python test_routes.py     # 61 assertions — classification, inheritance, exemptions,
+                          # v3→v4 conversion and write-back without word loss
 python test_gateway.py    # 38 assertions — re-route, tool stripping, fail-closed, SSE,
                           # upstream URL joining (POST + GET), field passthrough,
                           # no client-header leak, which key goes to which leg, banner
