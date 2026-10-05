@@ -88,6 +88,25 @@ jobs:
             exit 1
           fi
 
+      - name: 预检：这次同步有没有动 .github/workflows/
+        if: env.SYNCED == '1'
+        run: |
+          set -euo pipefail
+          # 实测结论（不是推演）：**GITHUB_TOKEN 推不动 .github/workflows/ 下的文件**。
+          # 试过一次，推送到 main 直接 failure，git 只丢一句原始拒绝理由。
+          # 与其让它以那个面目出现，不如在这里提前说清该怎么办。
+          touched=$(git diff --name-only "$SYNCED_FROM..$SYNCED_TO" -- .github/workflows/ || true)
+          if [ -n "$touched" ]; then
+            echo "::error::这次要同步的提交改了 .github/workflows/ 下的文件，GITHUB_TOKEN 推不动它们。"
+            echo "  涉及："
+            echo "$touched" | sed 's/^/    /'
+            echo "  在开发机上直接推一次 GitHub 即可（PAT 需要有 workflow scope）："
+            echo "    git push github master:main"
+            echo "  推完之后本 workflow 会恢复为正常空转。"
+            exit 1
+          fi
+          echo "预检通过：这次没动 workflow 文件。"
+
       - name: 先验（绿了才允许推）
         if: env.SYNCED == '1'
         run: |
