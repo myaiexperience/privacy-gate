@@ -232,7 +232,7 @@ def main():
 
         # 云端密钥走**环境变量**（`--cloud-key-env`）。这里给测试进程设一个假值，
         # 好验证"密钥去哪条腿"那三条性质（见 6.7）。
-        os.environ["PRIVACY_GATE_TEST_CLOUD_KEY"] = "sk-test-cloud-secret"
+        os.environ["PRIVACY_GATE_TEST_CLOUD_KEY"] = "test-key-not-a-secret"
 
         # ── 0. 上游 URL 拼接（纯函数，不需要起服务器）──
         # 这条是接上真上游之后补的：以前网关把上游 base 的 /v1 又拼了一遍
@@ -401,7 +401,7 @@ def main():
         _cloud_auth = [r.get("auth") for r in cloud_records if r.get("method") == "POST"]
         _local_auth = [r.get("auth") for r in local_records if r.get("method") == "POST"]
         check("云端腿带上了网关侧配置的密钥",
-              bool(_cloud_auth) and all(a == "Bearer sk-test-cloud-secret" for a in _cloud_auth),
+              bool(_cloud_auth) and all(a == "Bearer test-key-not-a-secret" for a in _cloud_auth),
               "云端收到的 auth：%s" % sorted(set(_cloud_auth)))
         check("本地腿没有 Authorization（云端密钥不会被送到本地）",
               bool(_local_auth) and all(a is None for a in _local_auth),
