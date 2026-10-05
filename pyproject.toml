@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "privacy-gate"
+version = "6.0.0"
+description = "A privacy gate for local AI agents: put the gate on the wire, not in the prompt."
+readme = "README.en.md"
+requires-python = ">=3.9"
+authors = [{ name = "playing-with-ai-x" }]
+keywords = ["privacy", "agent", "llm", "ollama", "gateway", "data-egress", "dlp"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Operating System :: OS Independent",
+  "Intended Audience :: Developers",
+  "Topic :: Security",
+]
+
+# ★ 零运行时依赖。
+# 这一行是承诺，check_zero_deps.py 是它的守卫——CI 第一步就会跑那条断言。
+# 要加依赖，请先改 README 上的承诺，而不是让它在别人 clone 下来时变成谎话。
+dependencies = []
+
+[project.urls]
+Repository = "https://gitee.com/playing-with-ai-x/privacy-gate"
+"Live demo" = "https://www.modelscope.cn/studios/xysrai/privacy-gate"
+
+[project.scripts]
+privacy-gate = "privacy_gate.cli:main"
+
+[tool.setuptools]
+# 仓库里这个目录叫 tools/（opencode 插件、prompts、文档都按这个路径调用它），
+# 装出来叫 privacy_gate。两个名字都保住，靠的就是这行映射——
+# 所以不用为了打包去搬文件、改路径、连带改一圈文档。
+package-dir = { "privacy_gate" = "tools" }
+packages = ["privacy_gate"]
+
+[tool.setuptools.data-files]
+# 出厂词表随包安装，供 paths.rules_path() 的最后一档找到。
+# 装好之后如果你想用自己的边界，仍然优先用 PRIVACY_GATE_RULES 指过去——
+# 直接改这个文件会在下次升级时被覆盖。
+"share/privacy-gate" = ["keywords/rules.json"]

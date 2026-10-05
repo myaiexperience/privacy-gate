@@ -60,7 +60,7 @@ EOF
 **改完必须跑，全绿才算完成：**
 
 ```bash
-python check.py            # 13 项体检（含规则契约 lint、收窄路径、可观测哨兵、零依赖、泄露审计）
+python check.py            # 14 项体检（含规则契约 lint、收窄路径、可观测哨兵、零依赖、泄露审计）
 python privacy_gate.py lint --strict
 ```
 
@@ -87,15 +87,48 @@ python privacy_gate.py lint --strict
 
 ## 写设计文档的方式
 
-本会话里被实现推翻的设计细节已经有四处（豁免作用域、`annotate` 语义、
-会话键推导、规则不可用时的 fail-closed）。所以：
+本会话里被实现或验证推翻的设计细节已经有**五处**（豁免作用域、`annotate` 语义、
+会话键推导、规则不可用时的 fail-closed，以及 D19 那条"看不懂就当成公开"的 fail-open 默认值——
+最后这条是**写测试**时读回代码才发现的）。所以：
 
 **纸上的设计要靠使用来验证。** 写完一段设计，尽量先拿它写一条真规则、
 跑一次真请求，再回来改文档。文档里保留"这里被实现纠正过"的痕迹，比抹平它更有用。
 
+## 打包：一个目录，两个身份（别搬文件）
+
+`tools/` 在仓库里叫 `tools/`，`pip install` 之后叫 `privacy_gate`。
+靠的是 `pyproject.toml` 里的 `package-dir = { "privacy_gate" = "tools" }`。
+
+**所以不要为了"看起来更像一个包"把文件搬进 `privacy_gate/` 目录。** 一搬，
+opencode 插件、`prompts/`、文档里所有 `tools/<mod>.py` 的路径同时失效。
+
+代价是模块开头的导入要写成两种上下文都能用的形式：
+
+```python
+try:                       # 被当作包导入（pip 安装后 / python -m privacy_gate.<mod>）
+    from . import paths
+except ImportError:        # 被当作脚本直接跑（python tools/<mod>.py）
+    import paths
+
+rules_model = paths.sibling("rules_model")
+```
+
+规则文件与数据目录的定位统一走 `tools/paths.py`——三种环境（检出 / 任意 cwd /
+pip 安装）各不一样，散在五个文件里必然会漏改一个。
+
+`check_zero_deps.py` 核两件事：所有 import 都是标准库或本仓库自身，
+**以及 `pyproject.toml` 的 `dependencies` 是空的**——运行时代码零依赖，
+但元数据里写了 `requests` 的话 pip 装的时候照样拉下来，承诺一样破。
+
+> 注意 `python -m privacy_gate.cli` **只在装好之后可用**：在检出里，根目录那个
+> `privacy_gate.py` 文件会把同名包遮蔽掉。这不是缺陷，是双身份的必然结果。
+
 ## 文件结构
 
 ```
+├── pyproject.toml                     # 打包元数据：dependencies 为空；package-dir 把 tools/ 映射成 privacy_gate
+├── tools/cli.py                       # CLI 实现：仓库模式按路径分发，包模式走 python -m
+├── tools/paths.py                     # 规则/数据路径解析（三种环境一份逻辑，别在别处再写一遍）
 ├── tools/gateway.py                   # ★ 传输层门禁（v6 的强制层）
 ├── tools/rules_model.py               # 规则模型 v4：匹配原语 + 豁免 + lint
 ├── tools/rules_engine.py              # 分级编排 + 多轮继承 + 决策日志
@@ -108,8 +141,8 @@ python privacy_gate.py lint --strict
 ├── keywords/rules.json                # 规则与边界（v4 契约，单一来源）
 ├── keywords/test_cases.json           # 纠正回流生成的回归用例
 ├── prompts/worker.md, cloud.md        # opencode 侧的 agent 提示词
-├── privacy_gate.py                    # 裸 CLI 入口
-├── check.py                           # 一键体检（13 项）
+├── privacy_gate.py                    # 仓库根的 CLI 转发脚本（让 clone 下来就能跑）
+├── check.py                           # 一键体检（14 项）
 ├── check_zero_deps.py                 # 零第三方依赖断言
 ├── check_no_leaks.py                  # 泄露面审计
 ├── test_routes.py / test_gateway.py / test_adapters.py

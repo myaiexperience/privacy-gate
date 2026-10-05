@@ -36,13 +36,15 @@ import json
 import os
 import sys
 
-_HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, _HERE)
-import rules_model  # noqa: E402
-import rules_engine  # noqa: E402
+try:
+    from . import paths
+except ImportError:  # 脚本模式
+    import paths
 
-DEFAULT_RULES = (os.environ.get("PRIVACY_GATE_RULES")
-                 or os.path.join(_HERE, "..", "keywords", "rules.json"))
+rules_model = paths.sibling("rules_model")
+rules_engine = paths.sibling("rules_engine")
+
+DEFAULT_RULES = paths.rules_path()
 
 
 def explain(text, rules, prev_level=None):

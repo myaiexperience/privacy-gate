@@ -30,10 +30,13 @@ import os
 import sys
 from collections import Counter
 
-_HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, _HERE)
+try:
+    from . import paths
+except ImportError:  # 脚本模式
+    import paths
+
 DEFAULT_LOG = (os.environ.get("PRIVACY_GATE_LOG")
-               or os.path.join(_HERE, "..", "data", "routing_log.jsonl"))
+               or os.path.join(paths.data_dir(), "routing_log.jsonl"))
 LEVELS = ("none", "medium", "high")
 
 

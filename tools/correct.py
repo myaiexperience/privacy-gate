@@ -33,26 +33,28 @@ import os
 import sys
 from datetime import datetime, timezone
 
-_HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, _HERE)
-import rules_model  # noqa: E402
+try:
+    from . import paths
+except ImportError:  # 脚本模式
+    import paths
+
+rules_model = paths.sibling("rules_model")
 
 # 规则文件可用 PRIVACY_GATE_RULES 指到别处；一旦指了，**测试用例与纠正记录就跟它放一起**。
-# 理由见 rules_engine.py 顶部：自己的词待在自己的文件里，别跟公开词表打架，
+# 理由见 paths.py：自己的词待在自己的文件里，别跟公开词表打架，
 # 也别把自己的业务词混进将要发布的那份。
 _ENV_RULES = os.environ.get("PRIVACY_GATE_RULES")
 if _ENV_RULES:
     RULES_PATH = os.path.abspath(_ENV_RULES)
-    BASE = os.path.dirname(RULES_PATH)
-    CASES_PATH = (os.environ.get("PRIVACY_GATE_CASES")
-                  or os.path.join(BASE, "test_cases.json"))
-    CORR_PATH = (os.environ.get("PRIVACY_GATE_CORRECTIONS")
-                 or os.path.join(BASE, "corrections.jsonl"))
+    _RULES_DIR = os.path.dirname(RULES_PATH)
 else:
-    BASE = os.path.join(_HERE, "..")
-    RULES_PATH = os.path.join(BASE, "keywords", "rules.json")
-    CASES_PATH = os.path.join(BASE, "keywords", "test_cases.json")
-    CORR_PATH = os.path.join(BASE, "data", "corrections.jsonl")
+    RULES_PATH = paths.rules_path()
+    _RULES_DIR = os.path.dirname(RULES_PATH)
+
+CASES_PATH = (os.environ.get("PRIVACY_GATE_CASES")
+              or os.path.join(_RULES_DIR, "test_cases.json"))
+CORR_PATH = (os.environ.get("PRIVACY_GATE_CORRECTIONS")
+             or os.path.join(paths.data_dir(), "corrections.jsonl"))
 
 VALID_LEVELS = ("high", "medium")
 ACTIONS = ("add", "remove", "demote", "exempt")

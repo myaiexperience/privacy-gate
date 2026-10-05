@@ -49,13 +49,15 @@ import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-_HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, _HERE)
-import gateway  # noqa: E402
-import rules_model  # noqa: E402
+try:
+    from . import paths
+except ImportError:  # 脚本模式
+    import paths
 
-DEFAULT_RULES = (os.environ.get("PRIVACY_GATE_RULES")
-                 or os.path.join(_HERE, "..", "keywords", "rules.json"))
+gateway = paths.sibling("gateway")
+rules_model = paths.sibling("rules_model")
+
+DEFAULT_RULES = paths.rules_path()
 
 SAMPLE_TOOLS = [
     {"type": "function", "function": {"name": "web_search", "parameters": {}}},

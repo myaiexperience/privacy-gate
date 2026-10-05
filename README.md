@@ -222,10 +222,31 @@ x-privacy-gate: level=high policy=reroute inherited=true tools-stripped=web_sear
 > 把本机 Ollama 的内网 IP 写进去，正好违反本项目自己的发布纪律。
 > 策略归策略，部署归部署。
 
+### 也可以装成命令
+
+```bash
+pip install .        # 零依赖，所以这一步没有依赖树要解析
+privacy-gate classify --stdin <<'EOF'
+帮我写一份保密协议
+EOF
+privacy-gate gateway --local-upstream http://127.0.0.1:11434/v1 --local-model "qwen3:35b"
+```
+
+仓库里那个目录叫 `tools/`（插件、prompts、文档都按这个路径调用它），装出来叫
+`privacy_gate`——靠 `pyproject.toml` 里的 `package-dir` 映射，两个名字都保住，
+所以打包没有要求任何人去搬文件、改路径、连带改一圈文档。
+
+装好之后的路径规则：出厂词表随包安装（`share/privacy-gate/rules.json`），
+数据落在 `~/.privacy-gate`；**你自己的词表仍然用 `PRIVACY_GATE_RULES` 指过去**。
+`privacy-gate doctor` 只在仓库检出里可用——它检查插件与配置模板这些检出才有的东西，
+装好的包里它会如实报错并给出替代命令，而不是假装成功。
+
 ## 目录结构
 
 ```
 ├── .opencode/plugins/privacy-gate.js  # 框架级门禁插件（四层防线的 1、2、3 层）
+├── tools/cli.py                       # CLI 实现（仓库模式按路径分发；包模式走 python -m）
+├── tools/paths.py                     # 规则/数据路径解析（检出、cwd、pip 安装三种环境一份逻辑）
 ├── tools/rules_model.py               # 规则模型 v4：匹配原语 + 语境豁免 + lint（策略层契约）
 ├── tools/rules_engine.py              # 分级编排 + 多轮继承 + 决策日志
 ├── tools/session.py                   # 会话状态（网关与适配器共用的会话键推导 + 继承）
@@ -238,7 +259,8 @@ x-privacy-gate: level=high policy=reroute inherited=true tools-stripped=web_sear
 ├── keywords/test_cases.json           # 纠正回流生成的回归用例
 ├── prompts/worker.md                  # 本地执行 agent 的系统提示（含兜底路径 + 委派规则）
 ├── prompts/cloud.md                   # 云端 agent 的系统提示（非 none 即拒绝）
-├── privacy_gate.py                    # 裸 CLI 入口：classify/explain/stats/correct/lint/gateway/doctor
+├── pyproject.toml                     # 打包元数据（dependencies 为空；package-dir 把 tools/ 映射成 privacy_gate）
+├── privacy_gate.py                    # 裸 CLI 入口（转发到 tools/cli.py，让 clone 下来就能跑）
 ├── adapters/                          # 适配器矩阵（网关之外的接法，含各自强度与验证状态）
 │   ├── claude-code/                   #   PreToolUse / UserPromptSubmit hook
 │   └── mcp/                           #   MCP stdio server（弱层，刻意只读）

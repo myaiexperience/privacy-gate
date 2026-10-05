@@ -55,15 +55,18 @@ import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-_HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, _HERE)
-import rules_engine  # noqa: E402
-import rules_model  # noqa: E402
-import session as session_mod  # noqa: E402
+# 两种上下文都要能导入（见 paths.sibling 的说明）
+try:
+    from . import paths
+except ImportError:  # 脚本模式
+    import paths
 
-_DATA = os.environ.get("PRIVACY_GATE_DATA") or os.path.join(_HERE, "..", "data")
-DEFAULT_RULES = (os.environ.get("PRIVACY_GATE_RULES")
-                 or os.path.join(_HERE, "..", "keywords", "rules.json"))
+rules_engine = paths.sibling("rules_engine")
+rules_model = paths.sibling("rules_model")
+session_mod = paths.sibling("session")
+
+_DATA = paths.data_dir()
+DEFAULT_RULES = paths.rules_path()
 DEFAULT_LOG = os.environ.get("PRIVACY_GATE_LOG") or os.path.join(_DATA, "routing_log.jsonl")
 DEFAULT_STATE = (os.environ.get("PRIVACY_GATE_STATE")
                  or os.path.join(_DATA, "gateway_sessions.json"))

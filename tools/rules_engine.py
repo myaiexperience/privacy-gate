@@ -45,22 +45,20 @@ import os
 import sys
 from datetime import datetime, timezone
 
-# 显式插入本目录：兼容被 shim 转发、被测试 import、以及作为子进程直接执行三种情形
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import rules_model  # noqa: E402
+# 两种上下文都要能导入（见 paths.sibling 的说明）：
+#   - 被当作包导入（pip 安装后 / python -m privacy_gate.rules_engine）
+#   - 被当作脚本直接跑（python tools/rules_engine.py，插件和 prompts 就是这么调的）
+try:
+    from . import paths
+except ImportError:  # 脚本模式
+    import paths
 
-_HERE = os.path.dirname(os.path.abspath(__file__))
-_ROOT = os.path.join(_HERE, "..")
+rules_model = paths.sibling("rules_model")
 
-# 规则文件与数据目录都可以用环境变量指到别处。
-#
-# 这不是"配置灵活"那种可有可无的东西，而是**"边界由使用者定"的实际落地**：
-# 出厂词表是要发布、要被人抄走的默认值；你自己加的词属于你自己的策略，
-# 应该待在你自己的文件里——否则每次 git pull 都要跟公开词表打架，
-# 而"打架"的结局通常是使用者干脆不改了。
-RULES_PATH = os.path.abspath(
-    os.environ.get("PRIVACY_GATE_RULES") or os.path.join(_ROOT, "keywords", "rules.json"))
-DATA_DIR = os.environ.get("PRIVACY_GATE_DATA") or os.path.join(_ROOT, "data")
+# 规则文件与数据目录交给 paths 统一解析（三种运行环境各不一样），
+# 仍支持 PRIVACY_GATE_RULES / PRIVACY_GATE_DATA 覆盖——理由见 paths.py。
+RULES_PATH = paths.rules_path()
+DATA_DIR = paths.data_dir()
 LOG_PATH = os.path.join(DATA_DIR, "routing_log.jsonl")
 
 # 话题切换信号：默认值来自规则模型；规则文件里可用 topic_shift_keywords 覆盖
