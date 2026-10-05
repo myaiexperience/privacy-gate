@@ -134,9 +134,10 @@ python check.py
 
 ```
 ├── .opencode/plugins/privacy-gate.js  # 框架级门禁插件（四层防线的 1、2、3 层）
-├── tools/rules_engine.py              # 确定性检测 + 多轮继承 + 决策日志
-├── tools/correct.py                   # 纠正回流（关键词 + 回归用例 + 记录）
-├── keywords/rules.json                # 隐私关键词（单一来源，correct.py 自动追加）
+├── tools/rules_model.py               # 规则模型 v4：匹配原语 + 语境豁免 + lint（策略层契约）
+├── tools/rules_engine.py              # 分级编排 + 多轮继承 + 决策日志
+├── tools/correct.py                   # 纠正回流（扩充 / 收窄 / 降级 / 豁免 + 回归用例）
+├── keywords/rules.json                # 规则与边界（单一来源；v4 契约，v3 自动转换）
 ├── keywords/test_cases.json           # 纠正回流生成的回归用例
 ├── prompts/worker.md                  # 本地执行 agent 的系统提示（含兜底路径 + 委派规则）
 ├── prompts/cloud.md                   # 云端 agent 的系统提示（非 none 即拒绝）
@@ -144,7 +145,7 @@ python check.py
 ├── test_routes.py                     # 回归测试
 ├── data/                              # routing_log.jsonl / corrections.jsonl（运行时生成）
 ├── opencode.jsonc.example             # 配置模板（worker + cloud + provider 示例）
-├── docs/                              # 早期设计文档（v1 方案 / v3 执行计划，存档）
+├── docs/                              # 设计文档（v1 方案 / v3 执行计划存档；v6 网关提案）
 └── DECISIONS.md                       # 历次迭代决策日志（为什么砍、为什么留）
 ```
 

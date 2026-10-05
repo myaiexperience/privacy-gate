@@ -1,12 +1,20 @@
 #!/usr/bin/env python3
 """
-硬规则隐私检测引擎 v4
+硬规则隐私检测引擎 v5
 
-在 LLM 看到用户输入之前，用代码层确定性关键词匹配检测隐私信号。
-v4 新增：
+在 LLM 看到用户输入之前，用代码层确定性匹配检测隐私信号。
+**规则的表达与求值交给 tools/rules_model.py**（v4 契约：匹配原语可配 + exceptions 豁免 + id）；
+本模块只负责三件事：分级编排、会话继承、决策日志。
+
+规则模型 v4 带来的能力（详见 rules_model.py 顶部说明）：
+  - 匹配原语可配：substring（ASCII 自动词边界）/ word / regex
+  - exceptions + when：能表达"这个词在这个语境里别拦"
+  - id：决策日志能指向具体规则
+
+历史增量（保留原因见 DECISIONS.md）：
   - stdin 传参（消除 shell 注入/转义风险）
   - 会话级隐私继承（多轮追问不降级）+ 话题切换检测
-  - 决策日志（data/routing_log.jsonl）
+  - 决策日志（data/routing_log.jsonl），**写盘失败不影响分级**
   - ASCII 关键词词边界匹配（防 "veranda" 命中 NDA 之类误伤）
 
 用法：
@@ -23,8 +31,10 @@ v4 新增：
   # 日志写入失败只告警，不影响分级结果与退出码。
 
 输出 JSON 字段：
-  level            本轮关键词检测结果: none | medium | high
-  matched_keywords 命中的关键词
+  level            本轮检测结果: none | medium | high
+  matched_keywords 命中且**未被豁免**的词
+  matched_rules    命中的规则（含被豁免的，带豁免后的级别，供排查用）
+  exemptions       实际生效的豁免
   inherited        是否因会话继承抬升（多轮不降级）
   topic_shift      是否检测到话题切换（重置继承）
   effective_level  最终生效级别 = max(level, 继承级别)
@@ -32,9 +42,12 @@ v4 新增：
 
 import json
 import os
-import re
 import sys
 from datetime import datetime, timezone
+
+# 显式插入本目录：兼容被 shim 转发、被测试 import、以及作为子进程直接执行三种情形
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import rules_model  # noqa: E402
 
 RULES_PATH = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "..", "keywords", "rules.json"
@@ -42,19 +55,16 @@ RULES_PATH = os.path.join(
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data")
 LOG_PATH = os.path.join(DATA_DIR, "routing_log.jsonl")
 
-# 检测到这些信号时，重置上一轮的隐私继承（视为开启新话题）
-TOPIC_SHIFT_KEYWORDS = [
-    "换个话题", "不谈这个了", "另外开一个", "新的话题", "不聊这个了",
-    "下一个任务", "新任务", "说点别的", "换一个主题",
-]
+# 话题切换信号：默认值来自规则模型；规则文件里可用 topic_shift_keywords 覆盖
+TOPIC_SHIFT_KEYWORDS = rules_model.DEFAULT_TOPIC_SHIFT_KEYWORDS
 
-_LEVELS = ("none", "medium", "high")
-_LEVEL_RANK = {"none": 0, "medium": 1, "high": 2}
+_LEVELS = rules_model.LEVELS
+_LEVEL_RANK = rules_model.RANK
 
 
 def load_rules(path: str) -> dict:
-    with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)
+    """读规则文件（v3 / v4 自动识别）→ 归一化 v4 结构。"""
+    return rules_model.load_rules(path)
 
 
 def normalize(text: str) -> str:
@@ -62,56 +72,44 @@ def normalize(text: str) -> str:
 
 
 def _ascii_word_match(kw: str, text: str) -> bool:
-    """ASCII 关键词按词边界匹配，防止子串误伤（如 veranda 命中 NDA）。
+    """[已迁移] 词边界匹配。
 
-    中文关键词无空格词边界概念，仍用子串匹配。
+    v5 起由 rules_model.match_hits 统一负责。保留此函数名，避免历史调用方断裂。
     """
-    if kw.isascii() and any(c.isalpha() for c in kw):
-        return re.search(r"(?<![a-z0-9])" + re.escape(kw) + r"(?![a-z0-9])", text) is not None
-    return kw in text
+    return bool(rules_model.match_hits(
+        {"type": "substring", "patterns": [kw]}, text, normalize(text)))
 
 
 def check_privacy(user_input: str, rules: dict) -> dict:
-    """纯关键词检测，不涉及会话状态。"""
-    text = normalize(user_input)
-    result = {
-        "privacy_hit": False,
-        "level": "none",
-        "matched_keywords": [],
+    """分级（不涉及会话状态）。
+
+    返回字段兼容 v5.1：privacy_hit / level / matched_keywords；
+    另附 matched_rules 与 exemptions，供决策日志与 explain 使用。
+    """
+    ev = rules_model.evaluate(user_input, rules)
+    return {
+        "privacy_hit": ev["level"] != "none",
+        "level": ev["level"],
+        "matched_keywords": ev["matched_keywords"],
+        "matched_rules": ev["contributions"],
+        "exemptions": ev["exemptions"],
     }
 
-    # 先检查 high 级别
-    for kw in rules.get("privacy_high", {}).get("keywords", []):
-        if _ascii_word_match(normalize(kw), text):
-            result["matched_keywords"].append(kw)
 
-    if result["matched_keywords"]:
-        result["privacy_hit"] = True
-        result["level"] = "high"
-        return result
-
-    # 再检查 medium 级别
-    for kw in rules.get("privacy_medium", {}).get("keywords", []):
-        if _ascii_word_match(normalize(kw), text):
-            result["matched_keywords"].append(kw)
-
-    if result["matched_keywords"]:
-        result["privacy_hit"] = True
-        result["level"] = "medium"
-
-    return result
-
-
-def apply_inheritance(level: str, prev_level: str, text: str):
+def apply_inheritance(level: str, prev_level: str, text: str, topic_shift_keywords=None):
     """多轮隐私继承。
 
     规则（fail-closed）：
     - 本轮无关键词命中，且上一轮为 high/medium，且无话题切换信号 → 继承上一轮
     - 本轮命中关键词但级别低于上一轮 → 取更高级别（宁可多挡）
     - 检测到话题切换信号 → 一律重置为本轮检测结果
+
+    topic_shift_keywords 缺省用内置默认；规则文件里定义了就用文件里的
+    （保持旧的 3 参调用不破，同时让策略层能改这个话题切换词表）。
     """
     t = normalize(text)
-    topic_shift = any(kw in t for kw in TOPIC_SHIFT_KEYWORDS)
+    keywords = topic_shift_keywords or TOPIC_SHIFT_KEYWORDS
+    topic_shift = any(kw in t for kw in keywords)
     prev = prev_level if prev_level in _LEVELS else "none"
 
     inherited = False
@@ -224,7 +222,9 @@ def main(argv=None):
 
     rules = load_rules(RULES_PATH)
     result = check_privacy(user_input, rules)
-    effective, inherited, topic_shift = apply_inheritance(result["level"], prev_level, user_input)
+    effective, inherited, topic_shift = apply_inheritance(
+        result["level"], prev_level, user_input, rules.get("topic_shift_keywords")
+    )
     result.update({
         "inherited": inherited,
         "topic_shift": topic_shift,
@@ -239,6 +239,14 @@ def main(argv=None):
             "prev_level": prev_level,
             "level": result["level"],
             "matched_keywords": result["matched_keywords"],
+            # 规则级溯源：stats / 误伤报告要靠它算出"最吵的是哪条规则"
+            "matched_rules": [
+                {"id": c.get("rule_id", ""), "level": c.get("level", ""),
+                 "action": c.get("action", ""),
+                 **({"exempted_by": c["exempted_by"]} if c.get("exempted_by") else {})}
+                for c in result.get("matched_rules") or []
+            ],
+            "exemptions": [e.get("id", "") for e in result.get("exemptions") or []],
             "inherited": inherited,
             "topic_shift": topic_shift,
             "effective_level": effective,

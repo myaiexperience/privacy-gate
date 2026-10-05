@@ -12,6 +12,10 @@ opencode 隐私门禁一键体检（check.py）
   3. correct.py 回流  shim 可用（循环导入检查）+ UTF-8 stdin 解析 + 无副作用
   3.5 纠正回流写盘   在临时目录真实跑一次纠正：行尾锁定 LF + 末尾换行 +
                      只新增一行（防 Windows 下整文件被重写）
+  3.6 规则契约       rules.json 的 v4 schema 与 lint（未知字段、无效 regex、
+                     重复 id、悬空豁免作用域、层级冲突）
+  3.7 收窄路径       remove / demote / exempt 三种纠正在临时规则库上真实跑一遍，
+                     含"豁免不得溢出到同规则其他模式"这条安全回归
   4. 插件检查         node --check 语法 + "导出必须是函数"契约（桌面端加载要求）
   5. 状态文件         privacy-gate-state.json 合法、无引擎失败残留的假 medium
   6. Ollama 连通性    推理服务器可达 + 配置里的模型 tag 存在（不可达只告警，
@@ -76,6 +80,13 @@ TEST_ROUTES = _first_existing(
     os.path.join(CANON_DIR, "test_routes.py"),
     os.path.join(PROJECT_ROOT, "test_routes.py"),
 )
+
+# 规则模型（v4 契约）。发布包与活体布局下 tools/ 都在 CANON_DIR 旁。
+sys.path.insert(0, os.path.join(CANON_DIR, "tools"))
+try:
+    import rules_model  # noqa: E402
+except Exception:  # 真的缺了，由「规则契约」那一项体检报出来
+    rules_model = None
 
 KNOWN_PERMISSIONS = {"read", "glob", "grep", "webfetch", "websearch",
                      "write", "edit", "bash", "todo", "patch"}
@@ -384,7 +395,18 @@ def check_correct_write():
     try:
         os.makedirs(os.path.join(tmp, "tools"), exist_ok=True)
         os.makedirs(os.path.join(tmp, "keywords"), exist_ok=True)
-        shutil.copy2(SHIM_CORRECT, os.path.join(tmp, "tools", "correct.py"))
+        # 复制整个 tools/（不只是 correct.py）：correct.py 依赖 rules_model，
+        # 将来还可能加模块。只挑单个文件复制，加依赖时这条体检就会莫名其妙地失败。
+        tools_src = os.path.dirname(SHIM_CORRECT)
+        copied = 0
+        for name in sorted(os.listdir(tools_src)):
+            if name.endswith(".py"):
+                shutil.copy2(os.path.join(tools_src, name),
+                             os.path.join(tmp, "tools", name))
+                copied += 1
+        if not copied:
+            record("纠正回流写盘", "FAIL", f"{tools_src} 下没有 .py 可复制")
+            return
         shutil.copy2(RULES_PATH, os.path.join(tmp, "keywords", "rules.json"))
         if os.path.isfile(CASES_PATH):
             shutil.copy2(CASES_PATH, os.path.join(tmp, "keywords", "test_cases.json"))
@@ -422,6 +444,182 @@ def check_correct_write():
             record("纠正回流写盘", "PASS", "行尾锁定 LF、末尾换行、新增词只影响一行")
     except Exception as e:
         record("纠正回流写盘", "FAIL", f"调用异常: {e}")
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+# ── 3.6 规则文件契约（v4 schema + lint）────────────────────
+
+def check_rules_schema():
+    """规则文件的契约检查。
+
+    这是"开放性"的地基：使用者要写自己的边界，得先有契约可依。
+    v5.1 的 rules.json 看着像契约，其实只有 keywords 被引擎读——
+    对全仓库 .py 检索 action|description|_schema|_note 是零匹配。
+    v4 起契约显式化，这一项就负责让契约不漂移。
+    """
+    if rules_model is None:
+        record("规则契约", "FAIL", "rules_model 导入失败（tools/rules_model.py 缺失？）")
+        return
+    if not os.path.isfile(RULES_PATH):
+        record("规则契约", "FAIL", f"规则文件不存在: {RULES_PATH}")
+        return
+    try:
+        with open(RULES_PATH, encoding="utf-8") as f:
+            raw = json.load(f)
+    except Exception as e:
+        record("规则契约", "FAIL", f"规则文件不是合法 JSON: {e}")
+        return
+    try:
+        problems = rules_model.lint(raw)
+        rules = rules_model.normalize(raw)
+    except Exception as e:
+        record("规则契约", "FAIL", f"lint/normalize 异常: {e}")
+        return
+
+    summary = ("schema=%s 规则 %d 条 / 豁免 %d 条 / 远程工具模式 %d 个"
+               % (rules.get("schema"), len(rules["rules"]), len(rules["exceptions"]),
+                  len(rules["remote_tool_patterns"])))
+    errs = [m for s, m in problems if s == "error"]
+    warns = [m for s, m in problems if s == "warn"]
+    if errs:
+        record("规则契约", "FAIL", "%s；%d 个错误: %s" % (summary, len(errs), "; ".join(errs[:3])))
+    elif warns:
+        record("规则契约", "WARN", "%s；%d 个提示: %s" % (summary, len(warns), "; ".join(warns[:2])))
+    else:
+        record("规则契约", "PASS", summary + "；lint 无问题")
+
+
+# ── 3.7 纠正回流的收窄路径 ─────────────────────────────────
+
+def _correct_payload(tmp, payload):
+    """在临时规则库上跑一次 correct.py，返回 (退出码, 解析后的 JSON)。"""
+    args = [os.path.join(tmp, "tools", "correct.py")]
+    r = run_py(args, tmp, stdin_bytes=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+               timeout=60)
+    try:
+        return r.returncode, json.loads(r.stdout.decode("utf-8", "replace").strip())
+    except Exception:
+        return r.returncode, None
+
+
+def check_correct_actions():
+    """收窄路径（remove / demote / exempt）在临时目录里真实跑一遍。
+
+    v5.1 的 correct.py 只能追加，删不掉误伤的词。但**误伤比漏检更常见**——
+    "搜某公司收购的公开新闻被拦成 high"是本项目诚实清单的第一条局限。
+    一个"边界由你定"的工具链只支持放大、不支持收窄，是开放性的直接缺口。
+    这条体检就是防止收窄路径悄悄坏掉。
+    """
+    if rules_model is None or not os.path.isfile(SHIM_CORRECT):
+        record("收窄路径", "FAIL", "rules_model 或 correct.py 不可用")
+        return
+    tmp = tempfile.mkdtemp(prefix="privacy-gate-narrow-")
+    problems = []
+    detail = []
+    try:
+        os.makedirs(os.path.join(tmp, "tools"), exist_ok=True)
+        os.makedirs(os.path.join(tmp, "keywords"), exist_ok=True)
+        tools_src = os.path.dirname(SHIM_CORRECT)
+        for name in sorted(os.listdir(tools_src)):
+            if name.endswith(".py"):
+                shutil.copy2(os.path.join(tools_src, name), os.path.join(tmp, "tools", name))
+        rules_tmp = os.path.join(tmp, "keywords", "rules.json")
+        # 用**合成**规则库，而不是仓库自带的那份：自带的策略会随版本演进
+        # （比如它现在已经自带一条"公开新闻"豁免），拿它当测试基线会让这条体检
+        # 随策略变化而失效。测试要测的是工具，不是当前策略。
+        synthetic = {
+            "schema": "v4",
+            "rules": [
+                {"id": "high-default", "level": "high", "action": "block_remote",
+                 "match": {"type": "substring", "patterns": ["保密", "收购", "合同"]}},
+                {"id": "medium-default", "level": "medium", "action": "prefer_local",
+                 "match": {"type": "substring", "patterns": ["预算"]}},
+            ],
+            "exceptions": [],
+            "topic_shift_keywords": ["换个话题"],
+            "remote_tool_patterns": ["*web*", "*fetch*"],
+        }
+        with open(rules_tmp, "w", encoding="utf-8", newline="\n") as f:
+            json.dump(synthetic, f, ensure_ascii=False, indent=2)
+            f.write("\n")
+        if os.path.isfile(CASES_PATH):
+            shutil.copy2(CASES_PATH, os.path.join(tmp, "keywords", "test_cases.json"))
+
+        def load_tmp():
+            with open(rules_tmp, encoding="utf-8") as f:
+                return rules_model.normalize(json.load(f))
+
+        def level_of(text):
+            return rules_model.evaluate(text, load_tmp())["level"]
+
+        # 前提：这个词确实会被拦
+        if level_of("看看收购的公开新闻") != "high":
+            problems.append("前提不成立：合成规则里「收购」应当先判 high")
+
+        # 1) exempt —— 只在公开新闻语境下豁免
+        code, out = _correct_payload(tmp, {
+            "action": "exempt", "keyword": "收购",
+            "when": ["新闻", "公告", "公开报道"], "demote_to": "none",
+            "user_input": "看看收购的公开新闻", "note": "check",
+        })
+        if code != 0 or not (out or {}).get("ok"):
+            problems.append("exempt 失败：exit=%s out=%s" % (code, out))
+        else:
+            got = level_of("看看收购的公开新闻")
+            if got != "none":
+                problems.append("exempt 生效后应判 none，实得 %s" % got)
+            # 关键：豁免不得溢出到同规则的其他模式。
+            # 这条输入同时含「保密」（不该被豁免）和「收购」（已豁免）+ 触发词「新闻」，
+            # 如果豁免按规则级实现，「保密」会一起失效 → 判 none，那是安全漏洞。
+            other = level_of("帮我写保密协议，顺便看看收购的新闻")
+            if other != "high":
+                problems.append("豁免溢出了！「保密+收购+新闻」应仍为 high，实得 %s" % other)
+            detail.append("exempt 生效且未溢出")
+
+        # 2) remove —— 把词整个删掉，并清掉悬空的豁免作用域
+        code, out = _correct_payload(tmp, {
+            "action": "remove", "keyword": "收购", "note": "check",
+        })
+        if code != 0 or not (out or {}).get("ok"):
+            problems.append("remove 失败：exit=%s out=%s" % (code, out))
+        else:
+            if level_of("评估一下收购XX公司的可行性") != "none":
+                problems.append("remove 之后「收购」不该再命中")
+            dropped = (out or {}).get("dropped_scopes") or []
+            if not any("收购" in str(d.get("pattern", "")) or "作用域已全部失效" in str(d.get("reason", ""))
+                       for d in dropped):
+                problems.append("remove 后应报告被清理的悬空豁免，实得 %s" % dropped)
+            detail.append("remove 生效并清理悬空作用域")
+
+        # 3) demote —— 从 high 挪到 medium
+        code, out = _correct_payload(tmp, {
+            "action": "demote", "keyword": "合同", "to": "medium", "note": "check",
+        })
+        if code != 0 or not (out or {}).get("ok"):
+            problems.append("demote 失败：exit=%s out=%s" % (code, out))
+        else:
+            got = level_of("帮我写一份合同")
+            if got != "medium":
+                problems.append("demote 到 medium 后应判 medium，实得 %s" % got)
+            detail.append("demote 生效")
+
+        # 4) 改完必须仍是合法契约（行尾 LF + lint 无 error）
+        raw = open(rules_tmp, "rb").read()
+        if b"\r\n" in raw:
+            problems.append("收窄路径写盘引入了 CRLF")
+        if not raw.endswith(b"\n"):
+            problems.append("收窄路径写盘缺末尾换行")
+        errs = [m for s, m in rules_model.lint(json.loads(raw.decode("utf-8"))) if s == "error"]
+        if errs:
+            problems.append("改完 lint 报错: " + "; ".join(errs[:2]))
+
+        if problems:
+            record("收窄路径", "FAIL", "; ".join(problems))
+        else:
+            record("收窄路径", "PASS", "；".join(detail) + "；写盘 LF/lint 均正常")
+    except Exception as e:
+        record("收窄路径", "FAIL", "调用异常: %s" % e)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
@@ -565,6 +763,8 @@ def main():
     check_engine()
     check_correct()
     check_correct_write()
+    check_correct_actions()
+    check_rules_schema()
     check_plugin()
     check_state()
     if isinstance(cfg, dict):

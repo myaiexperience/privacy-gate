@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """
-规则路由回归测试 v5
+规则路由回归测试 v6
 - 验证 rules_engine.py 对各类输入的判定是否符合预期
 - 内置用例 + 外部用例（keywords/test_cases.json，由 correct.py 纠正回流自动追加）
 - 含多轮隐私继承用例
 - 含决策日志容错用例（日志写不进去时分级必须照常成功）
+- 含规则模型 v4 契约用例（匹配原语、模式级豁免、lint）
 - 用法: python test_routes.py
-- 每次修改 rules.json / rules_engine.py / correct.py 后必须跑一遍
+- 每次修改 rules.json / rules_engine.py / rules_model.py / correct.py 后必须跑一遍
 """
 
 import json
@@ -18,8 +19,10 @@ import tempfile
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "tools"))
 import rules_engine  # noqa: E402
+import rules_model  # noqa: E402
 
 ENGINE = rules_engine
+MODEL = rules_model
 RULES_PATH = os.path.join(os.path.dirname(__file__), "keywords", "rules.json")
 CASES_PATH = os.path.join(os.path.dirname(__file__), "keywords", "test_cases.json")
 
@@ -56,6 +59,11 @@ CASES = [
     ("这份报价单发给谁", "high", "报价单→high"),
     ("客户问我们的对外报价能不能再降", "high", "对外报价→high"),
     ("这批货的底价是多少", "high", "底价→high"),
+
+    # ---- v4 模式级豁免（修掉诚实清单第 1 条：公开新闻里的"收购"被误拦）----
+    ("看看某公司收购的公开新闻", "none", "收购+新闻 → 豁免 → none"),
+    ("帮我写保密协议，顺便看看收购的新闻", "high",
+     "★同时含「保密」+已豁免的「收购」+触发词「新闻」：豁免不得连带掐掉「保密」"),
     ("商业机密的保护措施", "high", "商业秘密→high"),
     ("NDA的条款有什么要求", "high", "NDA→high"),
     ("核心算法专利草案", "high", "核心算法+专利草案→high"),
@@ -104,6 +112,109 @@ INHERIT_CASES = [
 
 PASS = 0
 FAIL = 0
+
+
+def check_v4_model():
+    """规则模型 v4 契约测试。
+
+    最有价值的一条是"豁免不得溢出"：模式级豁免如果按规则级实现，
+    「帮我写一份保密协议，顺便看看新闻」会因为命中「新闻」把整条 high 规则
+    豁免掉，「保密」跟着失效——那是安全漏洞，不是小瑕疵。
+    """
+    global PASS, FAIL
+    print("-" * 60)
+    print("规则模型 v4 契约测试")
+    print("-" * 60)
+
+    rules = MODEL.normalize({
+        "schema": "v4",
+        "rules": [
+            {"id": "r-sub", "level": "high", "action": "block_remote",
+             "match": {"type": "substring", "patterns": ["保密", "收购"]}},
+            {"id": "r-re", "level": "medium", "action": "prefer_local",
+             "match": {"type": "regex", "patterns": [r"底价\s*是\s*多少"]}},
+            {"id": "r-word", "level": "high", "action": "block_remote",
+             "match": {"type": "word", "patterns": ["nda"]}},
+        ],
+        "exceptions": [
+            {"id": "news", "demote_to": "none",
+             "applies_to": [{"rule": "r-sub", "patterns": ["收购"]}],
+             "when": {"type": "substring", "patterns": ["新闻"]}},
+            {"id": "soft", "demote_to": "medium",
+             "applies_to": ["r-re"],
+             "when": {"type": "substring", "patterns": ["大概"]}},
+        ],
+    })
+
+    checks = [
+        ("模式级豁免只掐点名的模式", MODEL.evaluate("保密协议 收购 新闻", rules)["level"], "high"),
+        ("被豁免的模式确实不拦了", MODEL.evaluate("收购 新闻", rules)["level"], "none"),
+        ("豁免未触发时照常拦", MODEL.evaluate("收购 可行性", rules)["level"], "high"),
+        ("regex 原语生效", MODEL.evaluate("底价 是 多少", rules)["level"], "medium"),
+        ("regex 不匹配则 none", MODEL.evaluate("底价底价", rules)["level"], "none"),
+        ("word 原语生效", MODEL.evaluate("explain NDA", rules)["level"], "high"),
+        ("word 原语不误伤 veranda", MODEL.evaluate("veranda", rules)["level"], "none"),
+        ("demote_to=medium 是降级不是清除",
+         MODEL.evaluate("底价是 多少 大概", rules)["level"], "medium"),
+    ]
+    for note, got, want in checks:
+        ok = got == want
+        PASS += 1 if ok else 0
+        FAIL += 0 if ok else 1
+        print("[%s] %s → %s (期望 %s)" % ("PASS" if ok else "FAIL", note, got, want))
+
+    # v3 自动转换：转换后分级与动作都要保持
+    conv = MODEL.normalize({
+        "_schema": "v3",
+        "privacy_high": {"action": "block_remote", "keywords": ["保密"]},
+        "privacy_medium": {"action": "prefer_local", "keywords": ["预算"]},
+    })
+    ok = (MODEL.evaluate("保密", conv)["level"] == "high"
+          and MODEL.evaluate("预算", conv)["level"] == "medium"
+          and MODEL.evaluate("天气", conv)["level"] == "none"
+          and conv["rules"][0]["action"] == "block_remote")
+    PASS += 1 if ok else 0
+    FAIL += 0 if ok else 1
+    print("[%s] v3 自动转 v4 后分级与动作保持" % ("PASS" if ok else "FAIL"))
+
+    # lint 必须抓出的问题（否则"契约可见"就是空话）
+    lint_cases = [
+        ("未知顶层字段", {"schema": "v4", "rules": [], "bogus": 1}),
+        ("规则缺 id", {"schema": "v4", "rules": [
+            {"level": "high", "match": {"type": "substring", "patterns": ["x"]}}]}),
+        ("非法正则", {"schema": "v4", "rules": [
+            {"id": "a", "level": "high", "match": {"type": "regex", "patterns": ["("]}}]}),
+        ("重复 id", {"schema": "v4", "rules": [
+            {"id": "a", "level": "high", "match": {"type": "substring", "patterns": ["x"]}},
+            {"id": "a", "level": "medium", "match": {"type": "substring", "patterns": ["y"]}}]}),
+        ("豁免点名不存在的模式", {"schema": "v4",
+            "rules": [{"id": "a", "level": "high",
+                       "match": {"type": "substring", "patterns": ["x"]}}],
+            "exceptions": [{"id": "e", "applies_to": [{"rule": "a", "patterns": ["zzz"]}],
+                            "when": {"type": "substring", "patterns": ["w"]}}]}),
+        ("空规则表", {"schema": "v4", "rules": []}),
+    ]
+    for note, raw in lint_cases:
+        sevs = sorted({s for s, _ in MODEL.lint(raw)})
+        ok = "error" in sevs
+        PASS += 1 if ok else 0
+        FAIL += 0 if ok else 1
+        print("[%s] lint 抓出「%s」 (%s)"
+              % ("PASS" if ok else "FAIL", note, "、".join(sevs) or "没抓到"))
+
+    # 发布包自带的规则文件必须 lint 干净
+    try:
+        with open(RULES_PATH, encoding="utf-8") as f:
+            raw = json.load(f)
+        errs = [m for s, m in MODEL.lint(raw) if s == "error"]
+        ok = not errs
+        PASS += 1 if ok else 0
+        FAIL += 0 if ok else 1
+        print("[%s] 仓库自带 rules.json lint 无错误%s"
+              % ("PASS" if ok else "FAIL", ("：" + "; ".join(errs[:2])) if errs else ""))
+    except Exception as e:
+        FAIL += 1
+        print("[FAIL] 读取 rules.json 失败: %s" % e)
 
 
 def check_log_failsoft():
@@ -214,6 +325,7 @@ def main():
             f"继承={inherited} 话题切换={shift}  {note}"
         )
 
+    check_v4_model()
     check_log_failsoft()
 
     print("=" * 60)
