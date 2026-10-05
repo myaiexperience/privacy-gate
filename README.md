@@ -304,6 +304,9 @@ privacy-gate gateway --local-upstream http://127.0.0.1:11434/v1 --local-model "q
   > 把被测代码的错掩盖成了"正确"。见 [DECISIONS.md](DECISIONS.md) D23。
 
   修完（拼接改成替换 + 假上游改成路径严格）再跑，5 项全过。
+  **云端腿也验过了**：把它指向魔搭推理 API（真实云端 OpenAI 兼容端点），
+  五个用例全过——包括"话题切换后重置回云端"，那一条同时要求两条腿都对。
+
   **仍然没在 Ollama 上验过**：它和 llama.cpp 的 OpenAI 兼容层不是同一份实现。
   推理服务器在线时补上它只要一条命令：
 

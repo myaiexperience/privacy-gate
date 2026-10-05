@@ -225,8 +225,11 @@ before trusting it with anything:
   > test double had been masking a real defect as "correct". See DECISIONS D23.
 
   Fixed (replace the client's `/v1` instead of appending, and make the fakes path-strict) —
-  all 5 cases then pass. **Ollama itself remains unverified**: its OpenAI-compatible layer is
-  a different implementation from llama.cpp's. One command closes that gap:
+  all 5 cases then pass. **The cloud leg is verified too**: pointed at ModelScope's inference
+  API (a real cloud OpenAI-compatible endpoint), all five cases pass — including "topic shift
+  resets back to the cloud", which requires *both* legs to be right.
+  **Ollama itself remains unverified**: its OpenAI-compatible layer is a different
+  implementation from llama.cpp's. One command closes that gap:
 
   ```bash
   python tools/gateway_smoke.py --local-upstream http://<your-ollama>:11434/v1 \

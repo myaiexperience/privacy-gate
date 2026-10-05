@@ -35,9 +35,14 @@
         --local-model "qwen3:35b"
 
     # 3) 云 + 本地都配上，验证"公开走云、敏感走本地"的分流
+    #    —— 接**真实云端**时 --client-model 必须填一个云端认得的模型：
+    #       它对本地腿无所谓（网关会改写成 --local-model），但云端腿会原样转发。
     python tools/gateway_smoke.py \
         --local-upstream http://<你的Ollama地址>:11434/v1 --local-model "qwen3:35b" \
-        --cloud-upstream https://api.example.com/v1 --cloud-key-env MY_CLOUD_KEY
+        --cloud-upstream https://api.example.com/v1 --cloud-key-env MY_CLOUD_KEY \
+        --client-model "<云端认得的模型 id>"
+
+两条腿都已经在真实上游上跑过（本地 llama.cpp / 云端魔搭推理 API），见 DECISIONS D24。
 
 退出码：0 全部符合预期 / 1 有不符合的项 / 2 参数或环境有问题
 零第三方依赖。
@@ -158,9 +163,18 @@ def start_gateway(cfg):
     return httpd, gw
 
 
-def ask(base, text, session, tools=None, timeout=120, stream=False):
-    """发一次 chat/completions，返回 (状态码, 响应头, 解析后的体或 None)。"""
-    body = {"model": "smoke-test-model",
+def ask(base, text, session, tools=None, timeout=120, stream=False,
+        model="smoke-test-model"):
+    """发一次 chat/completions，返回 (状态码, 响应头, 解析后的体或 None)。
+
+    `model` 是**客户端发出的**模型名。它对本地腿无所谓（网关会改写成
+    `--local-model`），但对云端腿**会原样转发**——所以接真实云端上游时，
+    这里必须填一个它认得的模型，否则拿到的是 400 而不是路由结论。
+
+    （这又是一个同类教训：假上游不在乎模型名，于是这个写死的名字一直没暴露。
+    接真云端时它立刻变成挡路的东西——与"假上游接收任何路径"同一个毛病。）
+    """
+    body = {"model": model,
             "messages": [{"role": "user", "content": text}],
             "max_tokens": 16}
     if tools:
@@ -202,14 +216,21 @@ def check(note, ok, extra=""):
     return 0 if ok else 1
 
 
-def run_suite(base, sensitive_text, has_cloud, timeout, verbose=False):
-    """跑一组判定。返回失败数。"""
+def run_suite(base, sensitive_text, has_cloud, timeout, verbose=False,
+              client_model="smoke-test-model"):
+    """跑一组判定。返回失败数。
+
+    `client_model` 会原样发给网关（见 ask 的说明）——测真实云端上游时必须填对。
+    """
     fails = 0
     expect_none_route = "cloud" if has_cloud else "local"
 
+    def _ask(text, session, **kw):
+        return ask(base, text, session, timeout=timeout, model=client_model, **kw)
+
     # 1) 公开内容
-    st, hdr, body = ask(base, "帮我看看今天的天气怎么样", "smoke-public",
-                        tools=SAMPLE_TOOLS, timeout=timeout)
+    st, hdr, body = _ask("帮我看看今天的天气怎么样", "smoke-public",
+                         tools=SAMPLE_TOOLS)
     r = route_of(hdr)
     fails += check("公开内容走 %s" % expect_none_route,
                    st == 200 and r == expect_none_route,
@@ -219,8 +240,7 @@ def run_suite(base, sensitive_text, has_cloud, timeout, verbose=False):
                        str(body)[:200] if body else "")
 
     # 2) 敏感内容：必须走本地
-    st, hdr, body = ask(base, sensitive_text, "smoke-sensitive",
-                        tools=SAMPLE_TOOLS, timeout=timeout)
+    st, hdr, body = _ask(sensitive_text, "smoke-sensitive", tools=SAMPLE_TOOLS)
     r = route_of(hdr)
     fails += check("敏感内容走本地（无声重路由生效）",
                    st == 200 and r == "local", "status=%s route=%s" % (st, r))
@@ -232,8 +252,7 @@ def run_suite(base, sensitive_text, has_cloud, timeout, verbose=False):
                        "响应头里没有 tools-stripped（检查规则里的 remote_tool_patterns）")
 
     # 3) 同会话无关键词追问：继承
-    st, hdr, body = ask(base, "那第三条怎么改", "smoke-sensitive",
-                        tools=SAMPLE_TOOLS, timeout=timeout)
+    st, hdr, body = _ask("那第三条怎么改", "smoke-sensitive", tools=SAMPLE_TOOLS)
     r = route_of(hdr)
     gate = hdr.get("x-privacy-gate") or ""
     fails += check("无关键词追问仍走本地（多轮继承）",
@@ -242,15 +261,14 @@ def run_suite(base, sensitive_text, has_cloud, timeout, verbose=False):
 
     # 4) 话题切换：重置
     if has_cloud:
-        st, hdr, body = ask(base, "换个话题，聊聊 Docker 怎么用", "smoke-sensitive",
-                            tools=SAMPLE_TOOLS, timeout=timeout)
+        st, hdr, body = _ask("换个话题，聊聊 Docker 怎么用", "smoke-sensitive",
+                             tools=SAMPLE_TOOLS)
         r = route_of(hdr)
         fails += check("话题切换后重置回云端", st == 200 and r == "cloud",
                        "status=%s route=%s" % (st, r))
 
     # 5) 流式（真实模型下这条最慢，放最后）
-    st, hdr, body = ask(base, sensitive_text, "smoke-stream",
-                        timeout=timeout, stream=True)
+    st, hdr, body = _ask(sensitive_text, "smoke-stream", stream=True)
     r = route_of(hdr)
     fails += check("流式请求同样被路由到本地", st == 200 and r == "local",
                    "status=%s route=%s" % (st, r))
@@ -303,7 +321,8 @@ def self_test(args):
     srv, _ = start_gateway(cfg)
     try:
         fails = run_suite("http://127.0.0.1:%d/v1/chat/completions" % port,
-                          sensitive, True, args.timeout, args.verbose)
+                          sensitive, True, args.timeout, args.verbose,
+                          client_model=args.client_model)
         # 替身自己也要验收到的路径：一个接受任何路径的替身，会把网关的拼接错
         # 掩盖成"通过"——这正是它一开始干的事（见 make_fake_upstream 的说明）。
         bad = sorted({r["path"].split("?")[0] for r in records
@@ -344,7 +363,7 @@ def real_run(args):
     try:
         fails = run_suite("http://127.0.0.1:%d/v1/chat/completions" % port,
                           sensitive, bool(args.cloud_upstream), args.timeout,
-                          args.verbose)
+                          args.verbose, client_model=args.client_model)
     finally:
         try:
             srv.shutdown()
@@ -373,6 +392,10 @@ def main(argv=None):
     p.add_argument("--local-upstream", default=os.environ.get("PRIVACY_GATE_LOCAL_UPSTREAM"),
                    help="真实本地上游（如 Ollama 的 /v1）")
     p.add_argument("--local-model", default=os.environ.get("PRIVACY_GATE_LOCAL_MODEL", ""))
+    p.add_argument("--client-model",
+                   default=os.environ.get("PRIVACY_GATE_CLIENT_MODEL", "smoke-test-model"),
+                   help="客户端发出的 model 名。本地腿无所谓（网关会改写），"
+                        "但云端腿会原样转发——测真实云端上游时必须填一个它认得的模型")
     p.add_argument("--cloud-upstream", default=os.environ.get("PRIVACY_GATE_CLOUD_UPSTREAM", ""))
     p.add_argument("--cloud-key-env", default="PRIVACY_GATE_CLOUD_KEY")
     p.add_argument("--rules", default=DEFAULT_RULES)
