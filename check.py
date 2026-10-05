@@ -38,8 +38,12 @@ opencode 隐私门禁一键体检（check.py）
                      只会让第一个照抄的人白费功夫
 
 用法:
-  python 01-OpenCode配置/check.py      # 活体项目布局
-  python check.py                     # 发布包布局（copy 到发布包根目录后）
+  python check.py                     # 发布包布局（本目录即项目根）
+  python 01-OpenCode配置/check.py      # 活体布局——**整个包都在那个目录下**时才有意义
+
+  ⚠️ 还有一种后来才出现的布局：活体只留转发 shim、真引擎与检查器都在发布包。
+    那种布局下本脚本会**认出并说明**，让你去跑活体自己的 check.py，
+    而不是连着报九个 FAIL——那读起来像"代码坏了"，而真相是"这个模式不适用"。
 
 退出码: 0=全绿（允许有 WARN）  1=存在 FAIL
 改 rules.json / rules_engine.py / correct.py / privacy-gate.js 后必须跑一遍。
@@ -1142,6 +1146,32 @@ def main():
     print("opencode 隐私门禁一键体检")
     print(f"项目根: {PROJECT_ROOT}")
     print("=" * 60)
+
+    # 先分清"这到底是哪种活体布局"，否则会报出一堆像"代码坏了"的失败。
+    #
+    # 本脚本的「活体布局」指的是：**整个包都在 <项目根>/01-OpenCode配置/ 下**，
+    # 助手脚本（check_zero_deps.py 等）与测试套件都在那里。
+    #
+    # 但还有一种后来才出现的布局：活体只留转发 shim，真引擎与检查器都在发布包。
+    # 那种情况下这里查不到助手脚本，会连着报九个 FAIL——**读起来像代码坏了，
+    # 真相是这个模式不适用**。所以这里先把它认出来，说清楚，然后退出。
+    if LAYOUT == "live":
+        _helpers = ("check_zero_deps.py", "check_no_leaks.py", "check_docs.py")
+        _missing = [h for h in _helpers if not os.path.isfile(os.path.join(_HERE, h))]
+        if _missing:
+            print("")
+            print("这个目录不是「完整的活体布局」，本脚本不适用。")
+            print("")
+            print("  本脚本的活体布局 = 整个包都在 %s 下。" % _HERE)
+            print("  而这里缺：%s" % "、".join(_missing))
+            print("")
+            print("  说明引擎与检查器在别处（发布包里），活体只是转发。这种布局请跑：")
+            print("      python %s" % os.path.join(PROJECT_ROOT, "01-OpenCode配置", "check.py"))
+            print("  它检查的是活体该关心的东西：配置解析、插件契约、引擎中文端到端、")
+            print("  Ollama 连通性、活体回归测试。")
+            print("")
+            print("  要检查发布包本身，去发布包目录跑 python check.py。")
+            return 2
 
     gcfg = load_global_config()
     cfg = check_config(gcfg)
