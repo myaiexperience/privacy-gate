@@ -1171,6 +1171,97 @@ def check_docs_commands():
                "%d 处对不上：%s" % (len(detail), " | ".join(detail[:3])) or last)
 
 
+def check_hook_example():
+    """给 Claude Code 的 settings 示例做结构校验。
+
+    ★ 为什么要有这一项：这个文件是别人**照抄进 `.claude/settings.json`** 的，
+    而此前**没有任何检查提到过它**——JSON 写坏、事件名写成 hook 根本不处理的那个、
+    或者 command 指向一个不存在的脚本，都会静静地发布出去，等别人踩到。
+    （与 D38 同一个形状：会在别人手里生效的产物，自己这边没人验。）
+
+    判定标准尽量**从 hook 源码推导**，不在这里再抄一份清单：
+      * 配的事件名 = hook 实际处理的事件名
+      * command 里的脚本路径，要有一段仓库内确实存在的尾巴
+      * 每个 matcher 能编译成正则
+      * hook 的 DEFAULT_REMOTE_TOOLS 里那些**具体**工具名，要被 matcher 覆盖到
+        （matcher 允许是超集：这里就是 `mcp__.*`，脚本内部会再按 remote_tools 判一次）
+    """
+    hook = os.path.join(_HERE, "adapters", "claude-code", "privacy_gate_hook.py")
+    example = os.path.join(_HERE, "adapters", "claude-code", "settings.example.json")
+    if not (os.path.isfile(hook) and os.path.isfile(example)):
+        return
+    problems = []
+    try:
+        with open(hook, encoding="utf-8") as f:
+            hook_src = f.read()
+        with open(example, encoding="utf-8") as f:
+            ex = json.load(f)
+    except Exception as e:
+        record("hook 示例校验", "FAIL", "读不到 hook 或示例: %s" % e)
+        return
+
+    handled = set(re.findall(r'name == "([A-Za-z]+)"', hook_src))
+    m = re.search(r"DEFAULT_REMOTE_TOOLS\s*=\s*\[(.*?)\]", hook_src, re.S)
+    remote = re.findall(r'"([^"]+)"', m.group(1)) if m else []
+
+    hooks = ex.get("hooks") or {}
+    if not handled:
+        problems.append("从 hook 源码里没解析出它处理哪些事件（正则失配？）")
+    else:
+        configured = set(hooks)
+        if configured - handled:
+            problems.append("示例配了 hook 不处理的事件：%s（它只处理 %s）"
+                            % (sorted(configured - handled), sorted(handled)))
+        if handled - configured:
+            problems.append("hook 处理的事件没在示例里出现：%s" % sorted(handled - configured))
+
+    pre_matchers = []
+    for event, blocks in hooks.items():
+        for block in blocks or []:
+            mm = block.get("matcher")
+            if mm:
+                try:
+                    re.compile(mm)
+                except re.error as e:
+                    problems.append("%s 的 matcher 不是合法正则: %r (%s)" % (event, mm, e))
+                if event == "PreToolUse":
+                    pre_matchers.append(mm)
+            for h in (block.get("hooks") or []):
+                cmd = str(h.get("command") or "")
+                pm = re.search(r'["\']([^"\']*\.py)["\']', cmd)
+                if not pm:
+                    problems.append("%s 的 command 里找不到 .py 路径: %r" % (event, cmd[:60]))
+                    continue
+                tail = pm.group(1).replace("\\", "/").split("/")
+                found = False
+                for i in range(len(tail)):
+                    if os.path.isfile(os.path.join(_HERE, *tail[i:])):
+                        found = True
+                        break
+                if not found:
+                    problems.append("%s 的 command 指向的脚本在仓库里找不到: %s"
+                                    % (event, pm.group(1)))
+
+    if remote and pre_matchers:
+        concrete = [t for t in remote if not any(c in t for c in "*?[")]
+        joined = "|".join("(?:%s)" % x for x in pre_matchers)
+        try:
+            rx = re.compile(joined)
+            missing = [t for t in concrete if not rx.fullmatch(t)]
+            if missing:
+                problems.append("PreToolUse 的 matcher 没覆盖 hook 判为远程的具体工具：%s"
+                                % missing)
+        except re.error:
+            pass  # 已在上面单独报过
+
+    if problems:
+        record("hook 示例校验", "FAIL", "; ".join(problems))
+    else:
+        record("hook 示例校验", "PASS",
+               "示例的 JSON / 事件名 / 脚本路径 / matcher 与 hook 源码一致（覆盖 %s）"
+               % "、".join(sorted(handled)))
+
+
 # ── 主流程 ─────────────────────────────────────────────────
 
 def find_studio_mirror():
@@ -1283,6 +1374,7 @@ def main():
     check_no_leaks()
     check_rules_override()
     check_docs_commands()
+    check_hook_example()
     check_studio_mirror()
 
     print("=" * 60)
