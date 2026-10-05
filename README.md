@@ -329,9 +329,14 @@ privacy-gate gateway --local-upstream http://127.0.0.1:11434/v1 --local-model "q
 - 主仓库（Gitee）：<https://gitee.com/playing-with-ai-x/privacy-gate>
 - 英文 README：[README.en.md](README.en.md)（给 GitHub 镜像与国际读者）
 - 在线演示（魔搭创空间）：<https://www.modelscope.cn/studios/xysrai/privacy-gate>
-  —— 演示源码在魔搭侧单独维护（创空间的「文件」页可看），但其中的分级引擎与词表
-  是按字节从本仓库同步的，`sync_engine.py --check` 做严格哈希校验，
-  所以页面上的判定与本仓库跑出来的判定必然是同一个
+  —— 演示源码在魔搭侧单独维护（创空间的「文件」页可看），但其中的分级引擎、
+  它依赖的同目录模块、以及词表都是**按字节**从本仓库同步的，`sync_engine.py --check`
+  做严格哈希校验（要同步哪几个文件是**从引擎源码推导**的，不是手抄的清单）
+
+  > 一句诚实的补充：**"字节一致"不等于"页面是对的"**。渲染层对规则的数据结构
+  > 有自己的假设——规则升到 v4 时，页面那张词表就静默变成过空的，而引擎同步得
+  > 完美无缺。那一层由创空间自己的 `smoke_test.py` 守着（这次就是它抓到的）。
+  > 详见 [DECISIONS.md](DECISIONS.md) D21
 - 早期设计存档在 [`docs/`](docs)，历次迭代的取舍见 [DECISIONS.md](DECISIONS.md)
 - **项目复盘长文**：[docs/writeup.md](docs/writeup.md) —— 六次迭代的完整记录，
   包括我自己设计里的五个漏洞。**这份是单一来源**，发到各平台的内容从它复制
