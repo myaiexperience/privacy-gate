@@ -283,8 +283,10 @@ x-privacy-gate: level=high policy=reroute inherited=true tools-stripped=web_sear
 
 ## 设计演进
 
-从 1.5B 小模型路由 → 纯规则引擎 → 门禁框架化 → 纠正回流 → 云端分层，六次迭代、
-每次砍掉什么、留下什么、为什么——见 [DECISIONS.md](DECISIONS.md)。
+从四象限设计 → 1.5B 小模型路由 → 纯规则引擎 → 门禁框架化 → 云端分层 →
+**门禁下沉到传输层**，六次迭代、每次砍掉什么、留下什么、为什么——见 [DECISIONS.md](DECISIONS.md)。
+其中最有用的一节是 [D14～D18](DECISIONS.md)：**四处被实现推翻的设计**（豁免作用域、
+`annotate` 语义、会话键推导、规则不可用时的 fail-closed）——它们比"我设计对了什么"更有参考价值。
 
 ## 相关上游 issue
 
