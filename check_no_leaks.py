@@ -11,8 +11,10 @@
 
 ★ 一个必须绕开的陷阱：扫描器不能把敏感词本身写进代码
 --------------------------------------------------
-如果为了检查"渠道价格"这类业务指纹词，就把它写进这个文件的 pattern 里，
+如果为了检查某个**业务指纹词**，就把它写进这个文件的 pattern 里，
 那这个文件本身就成了泄露源——**审计工具不该是秘密的副本**。
+（这段原本举了一个真实的业务词当例子，而那恰好犯了它自己警告的错。
+ 词表接上以后立刻被自己抓出来了——见 DECISIONS D32。）
 
 所以这里只放**通用类别**（私网地址、用户主目录、令牌形态），
 项目专属的敏感词走**本地词表**：
@@ -52,6 +54,12 @@ SKIP_DIRS = {".git", "__pycache__", ".venv", "venv", "env", "node_modules",
              ".pytest_cache", ".idea", ".vscode", "dist", "build"}
 SKIP_EXT = {".png", ".jpg", ".jpeg", ".gif", ".ico", ".zip", ".7z", ".exe",
             ".dll", ".so", ".dylib", ".woff", ".woff2", ".pdf", ".pyc"}
+# **本地词表文件本身必须排除。** 它按定义就装着要被查的词——不排除的话，
+# 每接上一个词，审计都会先把自己报一遍（"审计器不能扫自己"）。
+# 用**前缀**匹配而不是精确文件名：`leaks.local.txt.bak`、`~` 这类备份同样装着词，
+# 只挡一个准确名字等于给"顺手备份一下"留了个后门。
+# （这不是理论问题：接上词表的第一次运行就报了 7 处，其中 6 处来自它自己。）
+SKIP_FILE_PREFIX = ("leaks.local",)
 MAX_BYTES = 2 * 1024 * 1024
 
 # 通用类别。**不要在这里放项目专属的敏感词**——见文件头说明。
@@ -169,11 +177,14 @@ def iter_files(roots):
     for base in roots:
         full = base if os.path.isabs(base) else os.path.join(ROOT, base)
         if os.path.isfile(full):
-            yield full
+            if not os.path.basename(full).startswith(SKIP_FILE_PREFIX):
+                yield full
             continue
         for dirpath, dirnames, filenames in os.walk(full):
             dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
             for name in sorted(filenames):
+                if name.startswith(SKIP_FILE_PREFIX):
+                    continue
                 if os.path.splitext(name)[1].lower() in SKIP_EXT:
                     continue
                 yield os.path.join(dirpath, name)
@@ -269,6 +280,12 @@ def main(argv=None):
         print("      198.51.100.x / 203.0.113.x）——它们就是为此保留的。")
         return 1
     print("结果：未见私网地址、用户路径、令牌形态或本地词表命中。")
+    if not deny_words:
+        # 空的词表不是"没问题"，是"这一类没查"。别让它读起来像体检通过。
+        print("      注：**本地词表是空的**——目标里那句「不暴露真实业务关键词」，")
+        print("          这一类**这次没有被检查**。填你自己的词：")
+        print("            echo '客户代号' >> leaks.local.txt   （已 gitignore，不会被提交）")
+        print("          或 PRIVACY_GATE_DENY_WORDS='词1,词2' python check_no_leaks.py")
     return 0
 
 

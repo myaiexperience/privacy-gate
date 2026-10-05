@@ -195,6 +195,12 @@ Two claims are machine-guarded rather than promised: *zero third-party dependenc
 project-specific secret words itself, because an auditor that embeds the secrets is just
 another copy of them).
 
+> **One thing you fill in once**: your own project's sensitive words go into
+> `leaks.local.txt` (one per line, **gitignored — never committed**) or the
+> `PRIVACY_GATE_DENY_WORDS` env var. If you don't, the audit says so out loud —
+> *"the local word list is empty; this class was not checked"* — rather than
+> pretending it looked.
+
 ## Honest limitations
 
 This is a single-person homelab project. It is not a compliance control. Read this list
