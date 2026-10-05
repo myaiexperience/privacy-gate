@@ -24,6 +24,7 @@ import sys
 import tempfile
 import threading
 import time
+import traceback
 import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -206,6 +207,7 @@ REMOTE_TOOLS = [
 
 def main():
     tmp = tempfile.mkdtemp(prefix="privacy-gate-gwtest-")
+    crashed = None
     try:
         # 规则文件：一条 high（含"保密"）、一条 medium、一条语境豁免
         rules_path = os.path.join(tmp, "rules.json")
@@ -227,6 +229,10 @@ def main():
                 "remote_tool_patterns": ["*web*", "*fetch*", "*browse*", "*search*"],
             }, f, ensure_ascii=False, indent=2)
             f.write("\n")
+
+        # 云端密钥走**环境变量**（`--cloud-key-env`）。这里给测试进程设一个假值，
+        # 好验证"密钥去哪条腿"那三条性质（见 6.7）。
+        os.environ["PRIVACY_GATE_TEST_CLOUD_KEY"] = "sk-test-cloud-secret"
 
         # ── 0. 上游 URL 拼接（纯函数，不需要起服务器）──
         # 这条是接上真上游之后补的：以前网关把上游 base 的 /v1 又拼了一遍
@@ -257,6 +263,7 @@ def main():
                 "--cloud-upstream", "http://127.0.0.1:%d/v1" % cloud_port,
                 "--local-upstream", local_upstream or ("http://127.0.0.1:%d/v1" % local_port),
                 "--local-model", "local-small-model",
+                "--cloud-key-env", "PRIVACY_GATE_TEST_CLOUD_KEY",
                 "--timeout", "15",
             ])
             return gateway.Gateway(gateway.Config(args))
@@ -381,6 +388,30 @@ def main():
         check("客户端 Authorization 的值没有出现在 body 里",
               not _leak_auth,
               "★ Authorization 的值被写进了 body" if _leak_auth else "body 里没有该值")
+
+        # ── 6.7 密钥去哪条腿（安全性质）──
+        #
+        # 三条性质，此前一条断言都没有：
+        #   1. 云端腿必须带上**网关侧**配置的密钥（否则云端调用 401）
+        #   2. **本地腿绝不能带密钥**——那等于把你的云端密钥送到本地/第三方服务上
+        #   3. 客户端送来的 Authorization **不参与**：网关既不校验也不转发它
+        #      （服务端持密钥，客户端不需要知道真钥匙）
+        # 第 3 条顺带修了一处文档与行为不符的地方：clients.md 原先写"API Key 只用于
+        # 转发给云端上游"，而实际上它被整个丢掉了。
+        _cloud_auth = [r.get("auth") for r in cloud_records if r.get("method") == "POST"]
+        _local_auth = [r.get("auth") for r in local_records if r.get("method") == "POST"]
+        check("云端腿带上了网关侧配置的密钥",
+              bool(_cloud_auth) and all(a == "Bearer sk-test-cloud-secret" for a in _cloud_auth),
+              "云端收到的 auth：%s" % sorted(set(_cloud_auth)))
+        check("本地腿没有 Authorization（云端密钥不会被送到本地）",
+              bool(_local_auth) and all(a is None for a in _local_auth),
+              "本地收到的 auth：%s" % sorted(set(_local_auth)))
+        _all_auth = json.dumps(_cloud_auth + _local_auth, ensure_ascii=False)
+        check("客户端送来的 Authorization 没有被转发（用的是网关侧密钥）",
+              "CLIENT-SECRET-DO-NOT-FORWARD" not in _all_auth,
+              # str() 一下：这里混着 None 和字符串，直接 sorted 会 TypeError
+              # （而补充说明是提前求值的，那样的错会让整个套件崩掉——见 main 的兜底）
+              "上游收到的 auth：%s" % sorted({str(a) for a in _cloud_auth + _local_auth}))
 
         # ── 7. ★ fail-closed 方向性：本地上游不可达 → 502，且不回落云端 ──
         dead = gateway.Gateway(gateway.Config(gateway.build_parser().parse_args([
@@ -524,12 +555,21 @@ def main():
                 s.shutdown()
             except Exception:
                 pass
+    except Exception as e:
+        # 测试脚本**自己**出错时（例如某条断言的消息在求值时就抛异常），
+        # 不要让整个套件以一个裸 traceback 收场——那样连"跑到哪一步、哪些已经过了"
+        # 都看不到，而这两样恰恰是排查时最需要的。
+        crashed = e
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
     print("=" * 60)
+    if crashed is not None:
+        print("★ 测试脚本自身出错（不是被测代码失败）：%s: %s"
+              % (type(crashed).__name__, crashed))
+        traceback.print_exception(type(crashed), crashed, crashed.__traceback__)
     print("结果: %d 通过 / %d 失败" % (PASS, FAIL))
-    return 1 if FAIL else 0
+    return 1 if (FAIL or crashed is not None) else 0
 
 
 if __name__ == "__main__":

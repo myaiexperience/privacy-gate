@@ -168,9 +168,9 @@ appears in the report.
 python check.py           # the full doctor (coverage listed below, no fixed count:
                           # it varies with layout — see the note in check_docs.py)
 python test_routes.py     # 60 assertions — classification, inheritance, exemptions
-python test_gateway.py    # 35 assertions — re-route, tool stripping, fail-closed, SSE,
+python test_gateway.py    # 38 assertions — re-route, tool stripping, fail-closed, SSE,
                           # upstream URL joining (POST + GET), field passthrough,
-                          # no client-header leak into the forwarded body, startup banner
+                          # no client-header leak, which key goes to which leg, banner
 python test_adapters.py   # 36 assertions — MCP protocol, hook decisions, CLI,
                           # plus the JS↔Python field contract (see DECISIONS D19)
 python check_zero_deps.py # every import is stdlib — keeps the "zero deps" claim honest
