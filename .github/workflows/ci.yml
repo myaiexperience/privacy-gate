@@ -41,6 +41,10 @@ jobs:
       - name: Leak audit (private IPs, user paths, token shapes)
         run: python check_no_leaks.py
 
+      # 文档里的命令是用户唯一会照抄的东西——它飘了不会有测试失败
+      - name: Documentation command check
+        run: python check_docs.py
+
       - name: Classification regression
         run: python test_routes.py
 

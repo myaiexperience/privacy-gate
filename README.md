@@ -167,7 +167,12 @@ python check.py
 （含 Windows 管道编码崩溃路径）、correct.py（循环导入 + 零副作用）、规则契约 lint、
 收窄路径（含"豁免不得溢出"安全回归）、可观测工具（含 user_input 泄漏哨兵）、
 插件语法与导出契约、状态文件（假 medium 残留）、Ollama 连通性、三套回归测试、
-**零第三方依赖断言**、**泄露面审计**、**规则路径覆盖**——一共 14 项。全绿再启动 opencode。
+**零第三方依赖断言**、**泄露面审计**、**规则路径覆盖**、**文档命令核对**。
+全绿再启动 opencode。
+
+> 这里刻意**不写"一共 N 项"**：检查项数依赖布局——活体项目还有全局配置、
+> Provider 单一来源、Ollama 连通性三项，发布包里没有它们。
+> 写死的数字必然在两种布局里错一个，所以只列覆盖范围。
 
 CI（`.github/workflows/ci.yml`）在 GitHub 镜像上跑 2 个操作系统 × 3 个 Python 版本。
 要两个 OS 是因为这个项目有相当多**只在 Windows 上才暴露**的坑（管道编码、CRLF 与字节
@@ -270,6 +275,7 @@ privacy-gate gateway --local-upstream http://127.0.0.1:11434/v1 --local-model "q
 ├── test_adapters.py                   # 适配器回归测试（MCP 协议 / hook 决策 / CLI 分发）
 ├── check_zero_deps.py                 # 零第三方依赖断言——卖点必须由机器守
 ├── check_no_leaks.py                  # 泄露面审计（私网地址 / 用户路径 / 令牌形态）
+├── check_docs.py                      # 文档命令核对（提到的脚本 / 子命令 / 链接是否真的存在）
 ├── README.en.md                       # 英文 README（GitHub 镜像用）
 ├── .github/workflows/ci.yml           # CI：2 个 OS × 3 个 Python 版本
 ├── data/                              # routing_log.jsonl / corrections.jsonl（运行时生成）

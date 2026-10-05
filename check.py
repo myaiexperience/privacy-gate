@@ -33,6 +33,9 @@ opencode 隐私门禁一键体检（check.py）
                      发布前"不暴露内网 IP、主机名、业务关键词"这条不能靠人记得跑
   10. 规则路径覆盖     PRIVACY_GATE_RULES 必须真的替换（而非叠加）出厂词表，
                      且纠正回流写进自定义文件——这是"边界由使用者定"的落地
+  11. 文档命令核对     文档里提到的脚本 / 子命令 / 仓库路径 / 链接必须都存在。
+                     子命令清单从 tools/cli.py 读出——**文档飘了不会有测试失败**，
+                     只会让第一个照抄的人白费功夫
 
 用法:
   python 01-OpenCode配置/check.py      # 活体项目布局
@@ -1094,6 +1097,39 @@ def check_rules_override():
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+# ── 11. 文档命令核对 ───────────────────────────────────────
+
+def check_docs_commands():
+    """文档里的命令必须真的能跑。
+
+    README 上的命令是**用户唯一会照抄的东西**。解包之后 CLI 多了一条 `privacy-gate`、
+    仓库根那个脚本也换了实现——这类变化最容易漏改文档，**而文档飘了不会有任何测试失败**，
+    只会让第一个照抄的人白费功夫。
+
+    子命令清单**从 tools/cli.py 里读**，不手抄一份：抄一份的话，CLI 加了子命令而
+    文档没写，这条检查照样绿。
+    """
+    path = _first_existing(os.path.join(CANON_DIR, "check_docs.py"),
+                           os.path.join(PROJECT_ROOT, "check_docs.py"))
+    if not os.path.isfile(path):
+        record("文档命令核对", "FAIL", f"check_docs.py 不存在: {path}")
+        return
+    try:
+        r = run_py([path], CANON_DIR, timeout=180)
+    except Exception as e:
+        record("文档命令核对", "FAIL", f"调用异常: {e}")
+        return
+    lines = r.stdout.decode("utf-8", "replace").strip().splitlines()
+    last = lines[-1] if lines else ""
+    scanned = next((l for l in lines if l.startswith("扫描文档")), "")
+    if r.returncode == 0:
+        record("文档命令核对", "PASS", "；".join(x for x in (scanned, last) if x))
+    else:
+        detail = [l.strip() for l in lines if l.strip().startswith("[")]
+        record("文档命令核对", "FAIL",
+               "%d 处对不上：%s" % (len(detail), " | ".join(detail[:3])) or last)
+
+
 # ── 主流程 ─────────────────────────────────────────────────
 
 def main():
@@ -1127,6 +1163,7 @@ def main():
     check_zero_deps()
     check_no_leaks()
     check_rules_override()
+    check_docs_commands()
 
     print("=" * 60)
     fails = [r for r in results if r[1] == "FAIL"]

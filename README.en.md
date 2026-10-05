@@ -165,13 +165,15 @@ appears in the report.
 ## What is verified, and how
 
 ```
-python check.py           # 14 checks
+python check.py           # the full doctor (coverage listed below, no fixed count:
+                          # it varies with layout — see the note in check_docs.py)
 python test_routes.py     # 60 assertions — classification, inheritance, exemptions
 python test_gateway.py    # 26 assertions — re-route, tool stripping, fail-closed, SSE
 python test_adapters.py   # 36 assertions — MCP protocol, hook decisions, CLI,
                           # plus the JS↔Python field contract (see DECISIONS D19)
 python check_zero_deps.py # every import is stdlib — keeps the "zero deps" claim honest
 python check_no_leaks.py  # no private IPs, user paths, token shapes, or local deny words
+python check_docs.py      # every script, subcommand and link in the docs actually exists
 ```
 
 The gateway tests run two fake upstreams (cloud and local) around the gateway, so

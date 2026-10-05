@@ -60,7 +60,7 @@ EOF
 **改完必须跑，全绿才算完成：**
 
 ```bash
-python check.py            # 14 项体检（含规则契约 lint、收窄路径、可观测哨兵、零依赖、泄露审计）
+python check.py            # 全量体检（含规则契约 lint、收窄路径、可观测哨兵、零依赖、泄露审计、文档核对）
 python privacy_gate.py lint --strict
 ```
 
@@ -142,9 +142,10 @@ pip 安装）各不一样，散在五个文件里必然会漏改一个。
 ├── keywords/test_cases.json           # 纠正回流生成的回归用例
 ├── prompts/worker.md, cloud.md        # opencode 侧的 agent 提示词
 ├── privacy_gate.py                    # 仓库根的 CLI 转发脚本（让 clone 下来就能跑）
-├── check.py                           # 一键体检（14 项）
+├── check.py                           # 一键体检（项数随布局变化，文档里不写死数字）
 ├── check_zero_deps.py                 # 零第三方依赖断言
 ├── check_no_leaks.py                  # 泄露面审计
+├── check_docs.py                      # 文档命令核对（脚本 / 子命令 / 仓库路径 / 链接）
 ├── test_routes.py / test_gateway.py / test_adapters.py
 ├── .github/workflows/ci.yml           # 2 OS × 3 Python
 ├── docs/                              # 设计文档（v1 方案 / v3 计划存档 / v6 网关提案）
