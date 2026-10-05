@@ -363,6 +363,9 @@ privacy-gate gateway --local-upstream http://127.0.0.1:11434/v1 --local-model "q
 
 - 主仓库（Gitee）：<https://gitee.com/playing-with-ai-x/privacy-gate>
 - 镜像（GitHub）：<https://github.com/myaiexperience/privacy-gate>
+  （由 `.github/workflows/sync-from-gitee.yml` **每 6 小时自动从 Gitee 快进同步**——
+  开发机那条到 GitHub 的线路时通时断，所以把这条链路搬到了 GitHub 自己的 runner 上。
+  只做快进、绝不 force；同步下来的树要先跑通体检才允许推上去。）
 - 英文 README：[README.en.md](README.en.md)（给 GitHub 镜像与国际读者）
 - 在线演示（魔搭创空间）：<https://www.modelscope.cn/studios/xysrai/privacy-gate>
   —— 演示源码在魔搭侧单独维护（创空间的「文件」页可看），但其中的分级引擎、
