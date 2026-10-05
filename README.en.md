@@ -226,8 +226,8 @@ before trusting it with anything:
 - **Python 3.9+ is the stated floor and the machine this was written on only has 3.12.**
   The CI matrix covers 3.9 / 3.12 / 3.13; treat the lower bound as *asserted by CI*, not
   verified by hand here.
-- **The gateway has run against a real local upstream (llama.cpp / Ling-3.0-tiny), but never
-  against Ollama.** The assertions in `test_gateway.py` wrap the gateway with a fake cloud and
+- **The gateway has run against a real local upstream *and* a real cloud upstream.**
+  The assertions in `test_gateway.py` wrap the gateway with a fake cloud and
   a fake local upstream, which proves the *mechanism* — re-route, tool stripping, inheritance,
   fail-closed direction. It does not prove it *works*. So I later pointed it at a **real** local
   OpenAI-compatible server (the llama.cpp backend bundled with LM Studio on this machine):
@@ -242,12 +242,21 @@ before trusting it with anything:
   all 5 cases then pass. **The cloud leg is verified too**: pointed at ModelScope's inference
   API (a real cloud OpenAI-compatible endpoint), all five cases pass — including "topic shift
   resets back to the cloud", which requires *both* legs to be right.
-  **Ollama itself remains unverified**: its OpenAI-compatible layer is a different
-  implementation from llama.cpp's. One command closes that gap:
+
+  **Ollama is verified as well** (added during the 2026-10 wrap-up). Its OpenAI-compatible
+  layer is a different implementation from llama.cpp's, so it deserved its own run: local leg
+  pointed at the Ollama box on the LAN (`qwen3.6:35b`), cloud leg at the real inference API —
+  all five cases pass. The response header carries the decision:
+
+  ```
+  x-privacy-gate: level=high policy=reroute session=69243411 route=local
+  ```
+
+  One command (the script asserts the *routing decision*, never answer quality):
 
   ```bash
   python tools/gateway_smoke.py --local-upstream http://<your-ollama>:11434/v1 \
-      --local-model <model>
+      --local-model <model> --cloud-upstream <cloud base> --client-model <cloud model>
   ```
 
   It sends real requests and asserts only the **routing decision**, never answer quality.

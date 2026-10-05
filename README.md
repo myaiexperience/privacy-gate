@@ -306,7 +306,7 @@ privacy-gate gateway --local-upstream http://127.0.0.1:11434/v1 --local-model "q
 - **permission.ask 不可靠**：opencode 该 hook 有历史 bug 和回归记录，强制拦截只信 `tool.execute.before`
 - **云端护栏是 best-effort**：消息层抛错拦截受 opencode 版本行为影响；真正保险的是"敏感任务只用 @worker"
 - **插件字段名随版本漂移**：`chat.message` 的消息结构在不同 SDK 版本有差异；注入标注只改已有 part 的 text 字段、绝不新增 part（新增 part 缺 id/sessionID/messageID 会让桌面端消息保存失败）
-- **网关接过真实本地上游跑过（llama.cpp / Ling-3.0-tiny），但没在 Ollama 上跑过。**
+- **网关已在真实的本地上游 + 真实的云端上游上跑过。**
   `test_gateway.py` 用一对假上游（云 / 本地）夹住网关，验证重路由、工具剥夺、会话继承
   与 fail-closed 的方向性——那是**机制**验证。后来发现本机 LM Studio 的 llama.cpp 后端
   可以独立起一个真实的 OpenAI 兼容端点，于是接上去跑了一遍：
@@ -320,16 +320,24 @@ privacy-gate gateway --local-upstream http://127.0.0.1:11434/v1 --local-model "q
   **云端腿也验过了**：把它指向魔搭推理 API（真实云端 OpenAI 兼容端点），
   五个用例全过——包括"话题切换后重置回云端"，那一条同时要求两条腿都对。
 
-  **仍然没在 Ollama 上验过**：它和 llama.cpp 的 OpenAI 兼容层不是同一份实现。
-  推理服务器在线时补上它只要一条命令：
+  **Ollama 也验过了**（2026-10 收尾时补的）。它和 llama.cpp 的 OpenAI 兼容层不是
+  同一份实现，所以值得单独跑一遍：本地上游指向局域网里那台 Ollama
+  （`qwen3.6:35b`），云端腿指向真推理 API，五个用例全过——公开 → cloud、
+  敏感 → local（含 `web_search`/`web_fetch` 被摘掉）、无关键词追问 → 继承 local、
+  话题切换 → 重置回 cloud、流式 → local。响应头带决策便于核对：
+
+  ```
+  x-privacy-gate: level=high policy=reroute session=69243411 route=local
+  ```
+
+  命令就这一条（脚本只断言**路由决策**，不断言回答质量）：
 
   ```bash
   python tools/gateway_smoke.py --local-upstream http://<你的Ollama>:11434/v1 \
-      --local-model <模型名>
+      --local-model <模型名> --cloud-upstream <云端 base> --client-model <云端模型名>
   ```
 
-  它会打真请求，并只断言**路由决策**（不断言回答质量）。脚本自带 `--self-test`
-  （不需要任何真实上游，CI 里每次都会跑——免得它自己烂掉）。
+  脚本自带 `--self-test`（不需要任何真实上游，CI 里每次都会跑——免得它自己烂掉）。
 - **单人 homelab 验证**：非生产级、非大规模测试，欢迎反馈和 PR
 
 以上每一条，都是一块等人来补的"玉"。
