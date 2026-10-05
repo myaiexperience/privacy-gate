@@ -18,6 +18,11 @@ on:
   schedule:
     - cron: "23 3 * * *"
 
+# 同一分支上只保留最新一次：省 runner，也免得旧运行的结果误导人。
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     name: py${{ matrix.python }} / ${{ matrix.os }}
