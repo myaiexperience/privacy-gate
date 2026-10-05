@@ -18,6 +18,7 @@
 import json
 import os
 import shutil
+import socket
 import sys
 import tempfile
 import threading
@@ -105,6 +106,20 @@ def make_upstream(label, records, sse=False):
             self.wfile.write(payload)
 
     return Upstream
+
+
+def unused_port():
+    """拿一个几乎肯定没人监听的端口：绑 0 号端口拿到号再关掉。
+
+    不要写死 9 / 1 之类"看起来没人用"的端口——CI 机器上什么都可能监听，
+    那样测试就会时灵时不灵，而"时灵时不灵的安全测试"比没有更糟。
+    """
+    s = socket.socket()
+    try:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+    finally:
+        s.close()
 
 
 def start(handler_cls):
@@ -261,7 +276,7 @@ def main():
             "--state", os.path.join(tmp, "state2.json"),
             "--policy", "reroute",
             "--cloud-upstream", "http://127.0.0.1:%d/v1" % cloud_port,
-            "--local-upstream", "http://127.0.0.1:9/v1",   # 9 号端口基本必定不可达
+            "--local-upstream", "http://127.0.0.1:%d/v1" % unused_port(),
             "--timeout", "3",
         ])))
         srv2, port2 = serve_gw(dead)

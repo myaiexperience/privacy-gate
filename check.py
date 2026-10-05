@@ -27,6 +27,8 @@ opencode 隐私门禁一键体检（check.py）
                      fail-closed 方向性（本地上游挂了必须 502，绝不改走云端）
   7.6 适配器回归      test_adapters.py 全绿：MCP 协议 / Claude Code hook 决策 /
                      裸 CLI 分发；含"规则不可用时 fail-closed"这条安全回归
+  8. 零第三方依赖     AST 扫全仓库 import，动态判断是否标准库——
+                     守住 README 上"零依赖"那句话
 
 用法:
   python 01-OpenCode配置/check.py      # 活体项目布局
@@ -935,6 +937,35 @@ def check_adapters():
         record("适配器回归", "FAIL", f"退出码 {r.returncode}，末尾输出: {last}")
 
 
+# ── 8. 零第三方依赖 ────────────────────────────────────────
+
+def check_zero_deps():
+    """零第三方依赖断言。
+
+    本项目的卖点之一是零依赖——**卖点必须由机器守**。否则某天有人顺手
+    `import requests`，README 上那句话就变成谎话，而且是在别人 clone
+    下来跑不通的时候才发现。
+    """
+    path = _first_existing(os.path.join(CANON_DIR, "check_zero_deps.py"),
+                           os.path.join(PROJECT_ROOT, "check_zero_deps.py"))
+    if not os.path.isfile(path):
+        record("零第三方依赖", "FAIL", f"check_zero_deps.py 不存在: {path}")
+        return
+    try:
+        r = run_py([path], CANON_DIR, timeout=180)
+    except Exception as e:
+        record("零第三方依赖", "FAIL", f"调用异常: {e}")
+        return
+    lines = r.stdout.decode("utf-8", "replace").strip().splitlines()
+    last = lines[-1] if lines else ""
+    scanned = next((l for l in lines if l.startswith("扫描文件")), "")
+    if r.returncode == 0:
+        record("零第三方依赖", "PASS", "；".join(x for x in (scanned, last) if x))
+    else:
+        record("零第三方依赖", "FAIL",
+               last or ("退出码 %s" % r.returncode))
+
+
 # ── 主流程 ─────────────────────────────────────────────────
 
 def main():
@@ -965,6 +996,7 @@ def main():
     check_tests()
     check_gateway()
     check_adapters()
+    check_zero_deps()
 
     print("=" * 60)
     fails = [r for r in results if r[1] == "FAIL"]

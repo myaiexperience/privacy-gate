@@ -166,8 +166,13 @@ python check.py
 覆盖本项目历史上踩过的所有坑：配置解析（JSONC + prompt 引用 + 模型映射）、引擎中文端到端
 （含 Windows 管道编码崩溃路径）、correct.py（循环导入 + 零副作用）、规则契约 lint、
 收窄路径（含"豁免不得溢出"安全回归）、可观测工具（含 user_input 泄漏哨兵）、
-插件语法与导出契约、状态文件（假 medium 残留）、Ollama 连通性、回归测试。
-全绿再启动 opencode。
+插件语法与导出契约、状态文件（假 medium 残留）、Ollama 连通性、三套回归测试，
+以及**零第三方依赖断言**——一共 12 项。全绿再启动 opencode。
+
+CI（`.github/workflows/ci.yml`）在 GitHub 镜像上跑 2 个操作系统 × 3 个 Python 版本。
+要两个 OS 是因为这个项目有相当多**只在 Windows 上才暴露**的坑（管道编码、CRLF 与字节
+一致性、Store 占位 python 的 stub），而这些坑历史上都是发布前才发现的——
+矩阵把"发布前才发现"变成"提交时就发现"。
 
 ## v6：把门禁下沉到传输层（网关）
 
@@ -240,6 +245,9 @@ x-privacy-gate: level=high policy=reroute inherited=true tools-stripped=web_sear
 ├── test_routes.py                     # 分级回归测试
 ├── test_gateway.py                    # 网关回归测试（含"绝不回落云端"）
 ├── test_adapters.py                   # 适配器回归测试（MCP 协议 / hook 决策 / CLI 分发）
+├── check_zero_deps.py                 # 零第三方依赖断言——卖点必须由机器守
+├── README.en.md                       # 英文 README（GitHub 镜像用）
+├── .github/workflows/ci.yml           # CI：2 个 OS × 3 个 Python 版本
 ├── data/                              # routing_log.jsonl / corrections.jsonl（运行时生成）
 ├── opencode.jsonc.example             # 配置模板（worker + cloud + provider 示例）
 ├── docs/                              # 设计文档（v1 方案 / v3 执行计划存档；v6 网关提案）
@@ -273,6 +281,7 @@ x-privacy-gate: level=high policy=reroute inherited=true tools-stripped=web_sear
 ## 仓库与反馈
 
 - 主仓库（Gitee）：<https://gitee.com/playing-with-ai-x/privacy-gate>
+- 英文 README：[README.en.md](README.en.md)（给 GitHub 镜像与国际读者）
 - 在线演示（魔搭创空间）：<https://www.modelscope.cn/studios/xysrai/privacy-gate>
   —— 演示源码在魔搭侧单独维护（创空间的「文件」页可看），但其中的分级引擎与词表
   是按字节从本仓库同步的，`sync_engine.py --check` 做严格哈希校验，

@@ -1,0 +1,52 @@
+name: CI
+
+# 这个项目的主仓库在 Gitee（作者网络先够得着那边），本文件是为 GitHub 镜像准备的。
+# 在 Gitee 侧跑等价检查只需要一条命令： python check.py
+#
+# 之所以要两个 OS × 三个 Python 版本：本项目有相当多**只在 Windows 上才暴露**的坑
+# （管道编码、CRLF 与字节一致性、Store 占位 python 的 stub），
+# 而这些坑历史上都是发布前才发现的。矩阵就是把"发布前才发现"变成"提交时就发现"。
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: py${{ matrix.python }} / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python: ["3.9", "3.12", "3.13"]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      # 这里刻意**不**执行 pip install：本项目零第三方运行时依赖。
+      # 需要装东西才能跑，就说明这条承诺已经破了。
+      - name: Zero third-party dependency assertion
+        run: python check_zero_deps.py
+
+      - name: Classification regression
+        run: python test_routes.py
+
+      - name: Gateway regression (re-route / tool stripping / fail-closed)
+        run: python test_gateway.py
+
+      - name: Adapter regression (MCP protocol / hooks / CLI)
+        run: python test_adapters.py
+
+      # check.py 会把这些再跑一遍，但它还包含规则契约 lint、收窄路径、
+      # 可观测工具哨兵、插件契约等独立检查——是发布前的那道总闸。
+      - name: Doctor
+        run: python check.py
